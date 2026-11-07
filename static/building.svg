@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Fallback office icon (used when the site's own icon can't be fetched) -->
+  <rect width="64" height="64" rx="14" fill="#2f6fde"/>
+  <rect x="16" y="14" width="32" height="40" rx="2" fill="#ffffff"/>
+  <g fill="#2f6fde">
+    <rect x="21" y="19" width="8" height="6" rx="1"/><rect x="35" y="19" width="8" height="6" rx="1"/>
+    <rect x="21" y="29" width="8" height="6" rx="1"/><rect x="35" y="29" width="8" height="6" rx="1"/>
+    <rect x="21" y="39" width="8" height="6" rx="1"/><rect x="35" y="39" width="8" height="6" rx="1"/>
+    <rect x="28" y="47" width="8" height="7"/>
+  </g>
+</svg>

@@ -1,0 +1,10 @@
+pelican.conf
+pelican.conf.tmp
+config.json
+build/
+dist/
+*.spec
+__pycache__/
+tests/screenshots/
+
+docker/.env

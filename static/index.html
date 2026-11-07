@@ -1,0 +1,794 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pelican Control</title>
+<link rel="icon" id="favicon" href="building.svg">
+<style>
+:root{
+  --bg:#f4f5f7; --panel:#ffffff; --ink:#1b1f24; --muted:#65707d; --line:#dfe3e8;
+  --accent:#2f6fde; --heat:#e0612b; --cool:#2a7bd6; --fan:#6b7785; --ok:#2e9d5b; --bad:#d23c3c;
+  --heat-soft:#fdeee6; --cool-soft:#e6f0fc; --fan-soft:#eef0f2; --shadow:0 1px 2px rgba(0,0,0,.06),0 2px 8px rgba(0,0,0,.05);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#121519; --panel:#1b1f25; --ink:#e7eaee; --muted:#9aa4b0; --line:#2c323a;
+    --accent:#5b93f0; --heat:#f07a45; --cool:#5aa0ef; --fan:#9aa4b0; --ok:#4cc27c; --bad:#f06262;
+    --heat-soft:#3a2219; --cool-soft:#182a40; --fan-soft:#262b32; --shadow:none;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button,select,input{font:inherit;color:inherit}
+header{position:sticky;top:0;z-index:5;background:var(--panel);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:12px;padding:10px 20px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.site-icon{width:40px;height:40px;border-radius:10px;object-fit:cover;flex:none;background:var(--fan-soft);
+  box-shadow:0 0 0 1px var(--line)}
+.brand-text{display:flex;flex-direction:column;min-width:0;line-height:1.25}
+.brand-text h1{font-size:17px;margin:0;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brand-text .sub{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.login-brand{display:flex;align-items:center;gap:14px}
+.login-brand .site-icon{width:56px;height:56px;border-radius:14px}
+header .spacer{flex:1}
+.stamp{color:var(--muted);font-size:12px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px;cursor:pointer}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:disabled{opacity:.45;cursor:default}
+.btn.small{padding:3px 9px;font-size:12px}
+.btn:disabled{cursor:default}
+main{padding:20px;max-width:1400px;margin:0 auto}
+.banner{border-radius:10px;padding:12px 16px;margin-bottom:16px;background:var(--heat-soft);border:1px solid var(--heat);display:none}
+.banner.show{display:block}
+.banner b{color:var(--heat)}
+.summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.chip{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:12px;color:var(--muted)}
+.chip b{color:var(--ink)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:12px}
+.card.offline{opacity:.6}
+.card.dirty{border-color:var(--accent)}
+.card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.card-head h2{font-size:15px;margin:0}
+.desc{color:var(--muted);font-size:12px;cursor:pointer}
+.desc:hover{text-decoration:underline dotted}
+.run{font-size:11px;font-weight:600;border-radius:999px;padding:3px 9px;white-space:nowrap}
+.run.heat{background:var(--heat-soft);color:var(--heat)}
+.run.cool{background:var(--cool-soft);color:var(--cool)}
+.run.fan{background:var(--fan-soft);color:var(--fan)}
+.run.off{background:var(--fan-soft);color:var(--muted)}
+.run.bad{background:var(--bad);color:#fff}
+.temp-row{display:flex;align-items:baseline;gap:14px}
+.temp{font-size:44px;font-weight:300;letter-spacing:-1px;line-height:1}
+.temp small{font-size:20px;color:var(--muted)}
+.meta{color:var(--muted);font-size:12px;display:flex;flex-direction:column}
+.setpoints{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+.sp{border-radius:10px;padding:8px;display:flex;align-items:center;justify-content:space-between;gap:4px;min-width:0}
+.sp.heat{background:var(--heat-soft)} .sp.cool{background:var(--cool-soft)}
+.sp label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.sp.heat label{color:var(--heat)} .sp.cool label{color:var(--cool)}
+.sp .val{font-size:20px;font-weight:600;min-width:2.4ch;text-align:center}
+.step{flex:none;width:28px;height:28px;border-radius:50%;border:1px solid var(--line);background:var(--panel);cursor:pointer;font-size:16px;line-height:1}
+.step:hover{border-color:var(--muted)}
+.controls{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center}
+.controls > span{color:var(--muted);font-size:12px}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{flex:1;border:0;background:transparent;padding:5px 4px;cursor:pointer;font-size:12px}
+.seg button + button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--accent);color:#fff}
+.slaves{font-size:12px;color:var(--muted);border-top:1px dashed var(--line);padding-top:8px}
+.slaves div{display:flex;justify-content:space-between}
+.slaves b{color:var(--ink);font-weight:500}
+.card-foot{display:flex;gap:8px;justify-content:flex-end;align-items:center}
+.card-foot .msg{flex:1;font-size:12px;color:var(--muted)}
+.empty{text-align:center;color:var(--muted);padding:60px 0}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--ink);padding:0;width:min(520px,calc(100vw - 32px))}
+dialog.wide{width:min(960px,calc(100vw - 32px))}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+.dlg-head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}
+.dlg-head h3{margin:0;font-size:15px}
+.dlg-body{padding:18px;display:flex;flex-direction:column;gap:12px}
+.dlg-foot{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;align-items:center}
+.dlg-foot .msg{flex:1;font-size:12px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:12px;color:var(--muted)}
+.field input,.field select{padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.hint{font-size:12px;color:var(--muted)}
+.msg.ok{color:var(--ok)} .msg.bad{color:var(--bad)}
+.chart-wrap{position:relative}
+.chart-wrap svg{width:100%;height:auto;display:block}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.legend i{display:inline-block;width:14px;height:3px;vertical-align:middle;margin-right:5px;border-radius:2px}
+.tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12px;box-shadow:var(--shadow);display:none;white-space:nowrap}
+#login{position:fixed;inset:0;z-index:20;background:var(--bg);display:none;align-items:center;justify-content:center;padding:16px;overflow:auto}
+#login.show{display:flex}
+.login-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:26px;width:min(420px,100%);display:flex;flex-direction:column;gap:14px}
+.login-card h2{margin:0;font-size:20px}
+.login-card .sub{margin:-8px 0 4px;color:var(--muted);font-size:13px}
+.login-card .btn.primary{padding:9px 12px}
+.site-row{display:flex;gap:8px;align-items:stretch}
+.site-row select{flex:1;min-width:0;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+[hidden]{display:none !important}
+.who{font-size:12px;color:var(--muted)}
+header select{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:5px 8px;font-size:12px}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:999px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.show{opacity:1}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:s .8s linear infinite;vertical-align:-2px}
+@keyframes s{to{transform:rotate(360deg)}}
+nav.tabs{position:sticky;top:61px;z-index:4;background:var(--panel);border-bottom:1px solid var(--line);display:flex;gap:2px;padding:0 20px;overflow-x:auto;scrollbar-width:none}
+nav.tabs button{border:0;background:transparent;padding:10px 14px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap;font-weight:550}
+nav.tabs button:hover{color:var(--ink)}
+nav.tabs button.on{color:var(--accent);border-bottom-color:var(--accent)}
+nav.tabs .badge{display:inline-block;min-width:18px;padding:0 5px;margin-left:5px;border-radius:999px;background:var(--bad);color:#fff;font-size:11px;line-height:18px;text-align:center}
+.tab[hidden]{display:none}
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.toolbar input[type=search],.toolbar select,.toolbar input[type=date],.toolbar input[type=text]{padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.toolbar input[type=search]{min-width:220px;flex:1;max-width:340px}
+.toolbar label{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.group{margin-bottom:22px}
+.group > summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:10px;margin-bottom:12px;font-weight:650;font-size:15px}
+.group > summary::-webkit-details-marker{display:none}
+.group > summary::before{content:"▸";color:var(--muted);transition:transform .15s}
+.group[open] > summary::before{transform:rotate(90deg)}
+.group > summary .count{font-weight:400;color:var(--muted);font-size:12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:var(--shadow);margin-bottom:16px}
+.panel h3{margin:0 0 4px;font-size:15px}
+.panel > .hint{display:block;margin-bottom:12px}
+.tbl-wrap{overflow-x:auto}
+table.tbl{width:100%;border-collapse:collapse;font-size:13px}
+table.tbl th{text-align:left;font-weight:600;color:var(--muted);font-size:12px;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.tbl td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+table.tbl tr:last-child td{border-bottom:0}
+table.tbl td.num{text-align:right;font-variant-numeric:tabular-nums}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px 14px;align-items:start}
+.form-grid input[readonly]{background:transparent;border-color:transparent;padding-left:0;font-weight:550}
+.field.check{flex-direction:row;align-items:center;gap:8px;padding-top:24px}
+.field.check label{font-size:13px;color:var(--ink);white-space:nowrap}
+.card-head > div{min-width:0}
+.card-head .hint{overflow-wrap:anywhere}
+.card-head .pill,.card-head .run{flex:none}
+table.tbl th.num{text-align:right}
+.form-grid .field input,.form-grid .field select{width:100%}
+.form-actions{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
+.form-actions .msg{flex:1;font-size:12px}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:13px}
+.kv dt{color:var(--muted)} .kv dd{margin:0}
+.pill{display:inline-block;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:600;background:var(--fan-soft);color:var(--muted)}
+.pill.ok{background:var(--cool-soft);color:var(--ok)} .pill.bad{background:var(--heat-soft);color:var(--bad)} .pill.on{background:var(--heat-soft);color:var(--heat)}
+.note{font-size:12px;color:var(--muted);background:var(--fan-soft);border-radius:8px;padding:8px 10px}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+.sched-day{border-top:1px dashed var(--line);padding-top:10px;margin-top:10px}
+.sched-day h4{margin:0 0 6px;font-size:13px}
+.sched-row{display:grid;grid-template-columns:24px 118px 92px 64px 64px 76px 104px minmax(0,1fr);gap:6px;align-items:center;margin-bottom:6px;font-size:12px;max-width:860px}
+.sched-row input,.sched-row select{padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);width:100%;min-width:0}
+.sched-row span select{width:auto}
+.bars svg{width:100%;height:auto;display:block}
+.cards-mini{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+@media (max-width:600px){main{padding:16px} header{padding:10px 16px} nav.tabs{padding:0 8px;top:0;position:static}
+  .sched-row{grid-template-columns:24px 1fr 1fr 1fr;}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <img class="site-icon" id="siteIcon" src="building.svg" alt="">
+    <div class="brand-text">
+      <h1 id="siteName">Pelican Control</h1>
+      <span class="sub"><span id="siteDomain"></span><span id="who"></span></span>
+    </div>
+  </div>
+  <span class="spacer"></span>
+  <span class="stamp" id="stamp"></span>
+  <select id="selRefresh" title="Auto-refresh interval" aria-label="Auto-refresh interval">
+    <option value="15">Every 15 s</option><option value="30">Every 30 s</option><option value="60">Every 1 min</option>
+    <option value="120">Every 2 min</option><option value="300">Every 5 min</option>
+  </select>
+  <button class="btn" id="btnRefresh" title="Refresh now">Refresh</button>
+  <button class="btn" id="btnSwitch" title="Sign out and connect to a different site">Switch site</button>
+  <button class="btn" id="btnQuit" title="Stop the app">Quit</button>
+</header>
+
+<nav class="tabs" id="tabs" aria-label="Sections">
+  <button data-tab="zones" class="on">Zones</button>
+  <button data-tab="events">Events</button>
+  <button data-tab="schedules">Schedules</button>
+  <button data-tab="usage">Usage</button>
+  <button data-tab="power">Power</button>
+  <button data-tab="alerts">Alerts<span class="badge" id="alertBadge" hidden></span></button>
+  <button data-tab="site">Site</button>
+  <button data-tab="sites">My sites</button>
+</nav>
+
+<main>
+  <div class="banner" id="banner"></div>
+  <section class="tab" id="tab-zones">
+    <div class="toolbar">
+      <input type="search" id="zoneSearch" placeholder="Search zones…" aria-label="Search zones">
+      <label><input type="checkbox" id="zoneGroup" checked> Group by building/group</label>
+    </div>
+    <div class="summary" id="summary"></div>
+    <div id="grid"></div>
+  </section>
+  <section class="tab" id="tab-events" hidden></section>
+  <section class="tab" id="tab-schedules" hidden></section>
+  <section class="tab" id="tab-usage" hidden></section>
+  <section class="tab" id="tab-power" hidden></section>
+  <section class="tab" id="tab-alerts" hidden></section>
+  <section class="tab" id="tab-site" hidden></section>
+  <section class="tab" id="tab-sites" hidden></section>
+</main>
+
+<!-- Sign in (shown every time the program starts) -->
+<section id="login" aria-labelledby="loginTitle">
+  <form class="login-card" id="loginForm" autocomplete="on">
+    <div class="login-brand">
+      <img class="site-icon" id="loginIcon" src="building.svg" alt="">
+      <div><h2 id="loginTitle">Pelican Control</h2>
+        <p class="sub" style="margin:2px 0 0">Sign in to a Pelican site</p></div>
+    </div>
+    <div class="field" id="pickSiteField" hidden><label for="selSite">Pelican site</label>
+      <div class="site-row">
+        <select id="selSite" aria-label="Previously connected sites"></select>
+        <button type="button" class="btn small" id="btnForget" title="Remove this site from the list">Forget</button>
+      </div></div>
+    <div class="field" id="newSiteField"><label for="inSite">Pelican site URL</label>
+      <input id="inSite" name="site" placeholder="your-site.officeclimatecontrol.net" autocomplete="url" spellcheck="false" required>
+      <span class="hint">Every site has its own address. You can paste the full URL or just the first part, e.g. <code>your-site</code>.</span></div>
+    <div class="field"><label for="inUser">Email</label>
+      <input id="inUser" name="username" type="email" autocomplete="username" spellcheck="false" required></div>
+    <div class="field"><label for="inPass">Password</label>
+      <input id="inPass" name="password" type="password" autocomplete="current-password" required></div>
+    <button class="btn primary" type="submit" id="btnLogin">Sign in</button>
+    <button class="btn" type="button" id="btnLoadSites" title="Use your email and password to list every site on your Pelican account">Load my sites from Pelican</button>
+    <span class="msg" id="loginMsg" role="status"></span>
+    <span class="hint">Your password is kept only while the program is running. It's never saved to disk.
+      <code>pelican.conf</code> remembers only your recent sites and email.</span>
+  </form>
+</section>
+
+<!-- Zone details (filled by features.js) -->
+<dialog id="dlgZone" class="wide">
+  <form method="dialog">
+    <div class="dlg-head"><h3 id="zoneTitle">Zone</h3><button class="btn small" value="cancel">Close</button></div>
+    <div class="dlg-body" id="zoneBody"></div>
+  </form>
+</dialog>
+
+<!-- History -->
+<dialog id="dlgHist" class="wide">
+  <form method="dialog">
+    <div class="dlg-head"><h3 id="histTitle">History</h3>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="histHours" class="btn small">
+          <option value="6">6 hours</option><option value="24" selected>24 hours</option>
+          <option value="72">3 days</option><option value="168">7 days</option>
+        </select>
+        <button class="btn small" value="cancel">Close</button>
+      </div>
+    </div>
+    <div class="dlg-body">
+      <div class="legend">
+        <span><i style="background:var(--ink)"></i>Room temp</span>
+        <span><i style="background:var(--heat)"></i>Heat setpoint</span>
+        <span><i style="background:var(--cool)"></i>Cool setpoint</span>
+        <span><i style="background:var(--heat);opacity:.35;height:8px"></i>Heating</span>
+        <span><i style="background:var(--cool);opacity:.35;height:8px"></i>Cooling</span>
+        <span><i style="background:var(--fan);opacity:.35;height:8px"></i>Fan only</span>
+      </div>
+      <div class="chart-wrap" id="chartWrap"><span class="spin"></span></div>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const state = { stats: [], pending: {}, busy: {}, cardMsg: {}, timer: null, refreshSeconds: 60, sess: null, closedGroups: new Set() };
+
+// ------------------------------------------------------------------ API helpers
+async function api(path, body) {
+  const opt = body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Pelican-GUI": "1" }, body: JSON.stringify(body)
+  };
+  let res;
+  try { res = await fetch(path, opt); }
+  catch { throw new Error("Lost connection to the Pelican GUI app (is it still running?)"); }
+  const j = await res.json().catch(() => ({ ok: false, error: "Bad response" }));
+  if (!j.ok) {
+    if (j.auth) showLogin("Please sign in.");  // e.g. the app was restarted
+    throw new Error(j.error || "Request failed");
+  }
+  return j;
+}
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 2600);
+}
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function setMsg(el, text, kind) { el.textContent = text || ""; el.className = "msg" + (kind ? " " + kind : ""); }
+
+// ------------------------------------------------------------------ data load
+async function refresh(manual) {
+  if (!state.sess || !state.sess.signedIn) return;
+  const btn = $("#btnRefresh");
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
+  try {
+    const j = await api("/api/thermostats");
+    state.stats = j.data || [];
+    $("#stamp").textContent = "Updated " + new Date().toLocaleTimeString();
+    showBanner("");
+    if (manual) toast("Refreshed");
+  } catch (e) {
+    showBanner(e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "Refresh";
+    render();
+  }
+}
+function showBanner(msg) {
+  const b = $("#banner");
+  if (!msg) { b.classList.remove("show"); return; }
+  let extra = "";
+  if (/subscription expired/i.test(msg)) extra = " The Pelican subscription for this site has lapsed. Renew it with Pelican to control the thermostats again.";
+  if (/not signed in/i.test(msg)) return;
+  b.innerHTML = "<b>Couldn't load thermostats:</b> " + esc(msg) + extra;
+  b.classList.add("show");
+}
+function schedule() {
+  clearInterval(state.timer);
+  state.timer = setInterval(() => { if (!document.hidden) refresh(false); }, state.refreshSeconds * 1000);
+}
+
+// ------------------------------------------------------------------ render
+function runInfo(t) {
+  if (t.statusDisplay === "Unreachable") return { cls: "bad", txt: "Unreachable" };
+  const r = t.runStatus || "Off";
+  if (r.startsWith("Heat")) return { cls: "heat", txt: r.replace("-Stage", " · Stage ") };
+  if (r.startsWith("Cool")) return { cls: "cool", txt: r.replace("-Stage", " · Stage ") };
+  if (r.startsWith("Fan")) return { cls: "fan", txt: r === "Fan2" ? "Fan · Stage 2" : "Fan" };
+  return { cls: "off", txt: "Idle" };
+}
+function cur(t) { return Object.assign({}, t, state.pending[t.name] || {}); }
+
+function render() {
+  const grid = $("#grid");
+  if (!state.stats.length) {
+    grid.innerHTML = "";
+    $("#summary").innerHTML = "";
+    return;
+  }
+  // Summary chips
+  const temps = state.stats.map(t => +t.temperature).filter(n => !isNaN(n) && n > 0);
+  const count = k => state.stats.filter(t => runInfo(t).cls === k).length;
+  const avg = temps.length ? (temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1) : "–";
+  $("#summary").innerHTML =
+    `<span class="chip"><b>${state.stats.length}</b> zones</span>` +
+    `<span class="chip">Avg <b>${avg}°</b></span>` +
+    `<span class="chip"><b>${count("heat")}</b> heating</span>` +
+    `<span class="chip"><b>${count("cool")}</b> cooling</span>` +
+    `<span class="chip"><b>${count("fan")}</b> fan only</span>` +
+    (count("bad") ? `<span class="chip" style="color:var(--bad)"><b style="color:inherit">${count("bad")}</b> unreachable</span>` : "");
+
+  // Filter + group (groupName, e.g. "Building A")
+  const q = ($("#zoneSearch").value || "").trim().toLowerCase();
+  const shown = !q ? state.stats : state.stats.filter(t =>
+    [t.name, t.description, t.groupName, t.serialNo].some(v => String(v || "").toLowerCase().includes(q)));
+  if (!shown.length) { grid.innerHTML = '<div class="empty">No zones match your search.</div>'; return; }
+  if (!$("#zoneGroup").checked) { grid.innerHTML = `<div class="grid">${shown.map(cardHTML).join("")}</div>`; return; }
+  const groups = new Map();
+  for (const t of shown) {
+    const g = t.groupName || "Ungrouped";
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(t);
+  }
+  const names = [...groups.keys()].sort((a, b) => (a === "Ungrouped") - (b === "Ungrouped") || a.localeCompare(b));
+  grid.innerHTML = names.map(g => {
+    const list = groups.get(g), active = list.filter(t => ["heat", "cool", "fan"].includes(runInfo(t).cls)).length;
+    return `<details class="group" data-group="${esc(g)}" ${state.closedGroups.has(g) && !q ? "" : "open"}>
+      <summary>${esc(g)} <span class="count">${list.length} zone${list.length === 1 ? "" : "s"}${active ? ` · ${active} running` : ""}</span></summary>
+      <div class="grid">${list.map(cardHTML).join("")}</div></details>`;
+  }).join("");
+}
+$("#zoneSearch").addEventListener("input", () => render());
+$("#zoneGroup").addEventListener("change", () => render());
+// remember collapsed groups across refreshes
+$("#grid").addEventListener("toggle", e => {
+  const d = e.target; if (!d.dataset || d.dataset.group === undefined) return;
+  if (d.open) state.closedGroups.delete(d.dataset.group); else state.closedGroups.add(d.dataset.group);
+}, true);
+
+function seg(name, field, options, value) {
+  return `<div class="seg" data-name="${esc(name)}" data-field="${field}">` +
+    options.map(([v, label]) => `<button type="button" data-v="${v}" class="${v === value ? "on" : ""}">${label}</button>`).join("") +
+    `</div>`;
+}
+
+function cardHTML(t0) {
+  const t = cur(t0), n = t.name, run = runInfo(t0);
+  const dirty = !!state.pending[n] && Object.keys(state.pending[n]).length;
+  const busy = state.busy[n];
+  const m = state.cardMsg[n];
+  const slaves = (t0.slaves || []).map(s =>
+    `<div><span>${esc(s.name)} <span style="opacity:.7">(${esc(s.type)})</span></span><b>${esc(s.value)}${/temp/i.test(s.type) ? "°" : ""}</b></div>`).join("");
+  return `<article class="card ${run.cls === "bad" ? "offline" : ""} ${dirty ? "dirty" : ""}" data-name="${esc(n)}">
+    <div class="card-head">
+      <div><h2>${esc(n)}</h2><div class="desc" data-act="desc" data-name="${esc(n)}" title="Click to rename description">${esc(t.description || "Add description…")}</div></div>
+      <span class="run ${run.cls}">${run.txt}</span>
+    </div>
+    <div class="temp-row">
+      <div class="temp">${t0.temperature != null ? (+t0.temperature).toFixed(1) : "–"}<small>°</small></div>
+      <div class="meta">
+        ${t0.humidity ? `<span>${esc(t0.humidity)}% RH</span>` : ""}
+        <span>${esc(t0.status || "")}${t0.setBy ? " · set by " + esc(t0.setBy) : ""}</span>
+        <span>Schedule: ${esc(t0.scheduleName && t0.schedule !== "Off" ? t0.scheduleName : (t0.schedule || "–"))}${t0.setback === "On" ? ' · <b style="color:var(--heat)">DR setback</b>' : ""}</span>
+        ${t0.co2Level && +t0.co2Level > 0 ? `<span>CO₂ ${esc(t0.co2Level)} ppm</span>` : ""}
+        ${t0.demandRequest && t0.demandRequest !== "None" ? `<span style="color:var(--heat)">Requesting ${esc(t0.demandRequest)}</span>` : ""}
+      </div>
+    </div>
+    <div class="setpoints">
+      <div class="sp heat"><label>Heat</label>
+        <button class="step" data-act="step" data-name="${esc(n)}" data-field="heatSetting" data-d="-1" aria-label="Lower heat">−</button>
+        <span class="val">${esc(t.heatSetting)}</span>
+        <button class="step" data-act="step" data-name="${esc(n)}" data-field="heatSetting" data-d="1" aria-label="Raise heat">+</button></div>
+      <div class="sp cool"><label>Cool</label>
+        <button class="step" data-act="step" data-name="${esc(n)}" data-field="coolSetting" data-d="-1" aria-label="Lower cool">−</button>
+        <span class="val">${esc(t.coolSetting)}</span>
+        <button class="step" data-act="step" data-name="${esc(n)}" data-field="coolSetting" data-d="1" aria-label="Raise cool">+</button></div>
+    </div>
+    <div class="controls">
+      <span>Mode</span>${seg(n, "system", [["Off", "Off"], ["Heat", "Heat"], ["Cool", "Cool"], ["Auto", "Auto"]], t.system)}
+      <span>Fan</span>${seg(n, "fan", [["Auto", "Auto"], ["On", "On"]], t.fan)}
+      <span>Keypad</span>${seg(n, "frontKeypad", [["On", "Unlocked"], ["Off", "Locked"]], t.frontKeypad)}
+      <span>Occupancy</span>${seg(n, "status", [["Occupied", "Occupied"], ["Vacant", "Vacant"]], t.status)}
+      <span>Schedule</span>${seg(n, "schedule", [["On", "Running"], ["Off", "Hold"]], t.schedule === "Off" ? "Off" : "On")}
+    </div>
+    ${slaves ? `<div class="slaves">${slaves}</div>` : ""}
+    <div class="card-foot">
+      <span class="msg ${m ? m.kind : ""}">${m ? esc(m.text) : ""}</span>
+      <button class="btn small" type="button" data-act="details" data-name="${esc(n)}">Details</button>
+      <button class="btn small" type="button" data-act="hist" data-name="${esc(n)}">History</button>
+      ${dirty ? `<button class="btn small" type="button" data-act="undo" data-name="${esc(n)}">Undo</button>` : ""}
+      <button class="btn small primary" type="button" data-act="apply" data-name="${esc(n)}" ${dirty && !busy ? "" : "disabled"}>${busy ? '<span class="spin"></span>' : "Apply"}</button>
+    </div>
+  </article>`;
+}
+
+// ------------------------------------------------------------------ edits
+function stat(name) { return state.stats.find(t => t.name === name); }
+function edit(name, field, value) {
+  const orig = stat(name); if (!orig) return;
+  const p = state.pending[name] = state.pending[name] || {};
+  // "schedule" can hold a shared-schedule name; for the Running/Hold toggle that counts as "On".
+  const origVal = field === "schedule" ? (orig.schedule === "Off" ? "Off" : "On") : orig[field];
+  if (String(origVal) === String(value)) delete p[field]; else p[field] = value;
+  if (!Object.keys(p).length) delete state.pending[name];
+  delete state.cardMsg[name];
+  render();
+}
+
+$("#grid").addEventListener("click", async e => {
+  const segBtn = e.target.closest(".seg button");
+  if (segBtn) { const s = segBtn.parentElement; return edit(s.dataset.name, s.dataset.field, segBtn.dataset.v); }
+  const el = e.target.closest("[data-act]"); if (!el) return;
+  const name = el.dataset.name, act = el.dataset.act;
+  if (act === "step") {
+    const t = cur(stat(name)), f = el.dataset.field;
+    let v = (parseInt(t[f], 10) || 70) + (+el.dataset.d);
+    v = Math.max(35, Math.min(99, v));
+    // keep at least 2° between heat and cool by nudging the other one
+    if (f === "heatSetting" && v >= +t.coolSetting - 1) edit(name, "coolSetting", v + 2);
+    if (f === "coolSetting" && v <= +t.heatSetting + 1) edit(name, "heatSetting", v - 2);
+    return edit(name, f, v);
+  }
+  if (act === "undo") { delete state.pending[name]; delete state.cardMsg[name]; return render(); }
+  if (act === "apply") return apply(name);
+  if (act === "hist") return openHistory(name);
+  if (act === "details") return openZone(name);
+  if (act === "desc") {
+    const t = cur(stat(name));
+    const v = prompt(`Description for ${name}:`, t.description || "");
+    if (v === null) return;
+    if (/[;:]/.test(v)) return alert("Description can't contain : or ;");
+    return edit(name, "description", v.trim());
+  }
+});
+
+async function apply(name) {
+  const values = state.pending[name]; if (!values) return;
+  state.busy[name] = true; render();
+  try {
+    const j = await api("/api/thermostat", { name, values });
+    // optimistic: fold changes into the current snapshot, then re-poll
+    Object.assign(stat(name), values);
+    delete state.pending[name];
+    state.cardMsg[name] = { kind: "ok", text: "Saved" };
+    toast(`${name}: ${j.data || "saved"}`);
+    setTimeout(() => refresh(false), 3000);
+  } catch (err) {
+    state.cardMsg[name] = { kind: "bad", text: err.message };
+  } finally {
+    delete state.busy[name]; render();
+  }
+}
+
+// ------------------------------------------------------------------ sign in
+async function loadSession() {
+  const j = await api("/api/session");
+  state.sess = j.data;
+  $("#btnQuit").style.display = j.data.canQuit ? "" : "none";  // only on the PC running the app
+  state.refreshSeconds = Math.max(15, +j.data.refreshSeconds || 60);
+  const sel = $("#selRefresh");
+  if (![...sel.options].some(o => +o.value === state.refreshSeconds))
+    sel.add(new Option(`Every ${state.refreshSeconds} s`, state.refreshSeconds));
+  sel.value = String(state.refreshSeconds);
+  return j.data;
+}
+// Previously connected sites. The PC running the app keeps its list in
+// pelican.conf (server); other devices on the network keep theirs in this browser.
+const LS_KEY = "pelican.recentSites";
+function localSites() {
+  try { const v = JSON.parse(localStorage.getItem(LS_KEY) || "[]"); return Array.isArray(v) ? v.filter(x => typeof x === "string") : []; }
+  catch { return []; }
+}
+function saveLocalSites(list) { try { localStorage.setItem(LS_KEY, JSON.stringify(list.slice(0, 10))); } catch {} }
+function knownSites() {
+  const out = [];
+  for (const s of [...((state.sess && state.sess.recentSites) || []), ...localSites(), ...(state.accountSites || [])])
+    if (s && !out.includes(s)) out.push(s);
+  return out;
+}
+const NEW_SITE = "__new__";
+function siteLabel(s) { return s.endsWith(".officeclimatecontrol.net") ? `${s.replace(/\.officeclimatecontrol\.net$/, "")}  (${s})` : s; }
+function renderSites(preferred) {
+  const sites = knownSites(), sel = $("#selSite");
+  $("#pickSiteField").hidden = !sites.length;
+  if (!sites.length) { $("#newSiteField").hidden = false; setIcon($("#loginIcon"), ""); return; }
+  const want = sites.includes(preferred) ? preferred : sites[0];
+  sel.innerHTML = sites.map(s => `<option value="${esc(s)}">${esc(siteLabel(s))}</option>`).join("") +
+    `<option value="${NEW_SITE}">+ New site…</option>`;
+  sel.value = want;
+  onSitePick();
+}
+function onSitePick() {
+  const v = $("#selSite").value, isNew = v === NEW_SITE;
+  $("#newSiteField").hidden = !isNew;
+  $("#btnForget").hidden = isNew;
+  $("#inSite").value = isNew ? "" : v;
+  setIcon($("#loginIcon"), isNew ? "" : siteIconUrl(v, false));
+  if (isNew) setTimeout(() => $("#inSite").focus(), 0);
+}
+$("#selSite").addEventListener("change", onSitePick);
+// Typed a new address: show that site's icon once they leave the box.
+$("#inSite").addEventListener("change", () => {
+  const v = $("#inSite").value.trim();
+  setIcon($("#loginIcon"), v ? siteIconUrl(v, false) : "");
+});
+$("#btnForget").onclick = async () => {
+  const s = $("#selSite").value; if (!s || s === NEW_SITE) return;
+  saveLocalSites(localSites().filter(x => x !== s));
+  if (state.sess && (state.sess.recentSites || []).includes(s)) {
+    try { await api("/api/forget-site", { site: s }); } catch {}
+    state.sess.recentSites = state.sess.recentSites.filter(x => x !== s);
+  }
+  renderSites();
+  toast(`Removed ${s}`);
+};
+function showLogin(msg) {
+  clearInterval(state.timer);
+  const s = state.sess || {};
+  if (!$("#inUser").value) $("#inUser").value = s.lastUser || "";
+  $("#inPass").value = "";
+  renderSites(s.domain || s.lastSite || localSites()[0]);
+  setMsg($("#loginMsg"), msg || "");
+  $("#login").classList.add("show");
+  document.querySelectorAll("dialog[open]").forEach(d => d.close());
+  setTimeout(() => (!$("#inSite").value ? $("#inSite") : !$("#inUser").value ? $("#inUser") : $("#inPass")).focus(), 30);
+  try { if (!$("#inUser").value) $("#inUser").value = localStorage.getItem("pelican.lastUser") || ""; } catch {}
+}
+// Site "office" icon, fetched by the app from the Pelican site; falls back to building.svg.
+const FALLBACK_ICON = "building.svg";
+function setIcon(img, url) {
+  img.onerror = () => { img.onerror = null; img.src = FALLBACK_ICON; };
+  img.src = url || FALLBACK_ICON;
+}
+function setFavicon(url) {
+  const link = $("#favicon");
+  if (!url) { link.href = FALLBACK_ICON; return; }
+  const probe = new Image();
+  probe.onload = () => { link.href = url; };
+  probe.onerror = () => { link.href = FALLBACK_ICON; };
+  probe.src = url;
+}
+function siteIconUrl(domain, signedIn) {
+  if (!domain) return "";
+  // signed in: icon of the session's site (d= only busts the browser cache per site)
+  return signedIn ? `/api/site-icon?d=${encodeURIComponent(domain)}` : `/api/site-icon?site=${encodeURIComponent(domain)}`;
+}
+function showBrand(info) {
+  $("#siteName").textContent = info ? (info.altName || info.domain) : "Pelican Control";
+  $("#siteDomain").textContent = info ? info.domain : "";
+  $("#who").textContent = info && info.username ? " · " + info.username : "";
+  const url = info ? siteIconUrl(info.domain, true) : "";
+  setIcon($("#siteIcon"), url);
+  setFavicon(url);
+}
+
+function enterApp(info) {
+  $("#login").classList.remove("show");
+  showBrand(info);
+  document.title = `${info.altName || info.domain} · Pelican Control`;
+  state.stats = []; state.pending = {}; state.cardMsg = {}; state.closedGroups = new Set();
+  render(); refresh(false); schedule();
+  if (typeof featuresOnEnter === "function") featuresOnEnter(info);
+}
+$("#loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const btn = $("#btnLogin"), m = $("#loginMsg");
+  btn.disabled = true; m.innerHTML = '<span class="spin"></span> Connecting…'; m.className = "msg";
+  try {
+    const j = await api("/api/login", { site: $("#inSite").value, username: $("#inUser").value, password: $("#inPass").value });
+    $("#inPass").value = "";
+    saveLocalSites([j.data.domain, ...localSites().filter(x => x !== j.data.domain)]);
+    try { localStorage.setItem("pelican.lastUser", j.data.username); } catch {}
+    await loadSession();
+    $("#inSite").value = j.data.domain;
+    setMsg(m, "");
+    enterApp(j.data);
+  } catch (err) {
+    setMsg(m, err.message, "bad");
+    $("#inPass").select();
+  } finally { btn.disabled = false; }
+});
+// MySites: list every site on the Pelican account and add them to the dropdown.
+state.accountSites = [];
+$("#btnLoadSites").onclick = async () => {
+  const m = $("#loginMsg");
+  if (!$("#inUser").value || !$("#inPass").value) return setMsg(m, "Enter your email and password first, then click this.", "bad");
+  m.innerHTML = '<span class="spin"></span> Asking Pelican for your sites…'; m.className = "msg";
+  try {
+    const j = await api("/api/mysites", { username: $("#inUser").value, password: $("#inPass").value });
+    state.accountSites = (j.data || []).map(x => x.domain).filter(Boolean);
+    renderSites($("#selSite").value !== NEW_SITE ? $("#selSite").value : state.accountSites[0]);
+    setMsg(m, `Found ${state.accountSites.length} site${state.accountSites.length === 1 ? "" : "s"} on your account. Pick one and sign in.`, "ok");
+  } catch (err) { setMsg(m, err.message, "bad"); }
+};
+$("#btnSwitch").onclick = async () => {
+  const dirty = Object.keys(state.pending).length;
+  if (dirty && !confirm("You have changes that haven't been applied. Switch site anyway?")) return;
+  try { await api("/api/logout", {}); } catch {}
+  state.stats = []; state.pending = {}; render(); showBanner("");
+  showBrand(null); $("#stamp").textContent = ""; document.title = "Pelican Control";
+  await loadSession().catch(() => {});
+  $("#inUser").value = "";
+  showLogin("");
+};
+$("#selRefresh").onchange = async e => {
+  try { await api("/api/prefs", { refreshSeconds: +e.target.value }); } catch {}
+  state.refreshSeconds = +e.target.value; schedule();
+};
+
+// ------------------------------------------------------------------ site
+async function loadSiteName() {
+  try { const j = await api("/api/site"); $("#siteName").textContent = j.data.altName || state.sess.domain; }
+  catch { $("#siteName").textContent = state.sess && state.sess.domain || ""; }
+}
+
+// ------------------------------------------------------------------ history chart
+let histName = null;
+async function openHistory(name) {
+  histName = name;
+  $("#histTitle").textContent = `${name} · history`;
+  $("#dlgHist").showModal();
+  loadHistory();
+}
+$("#histHours").onchange = loadHistory;
+async function loadHistory() {
+  const wrap = $("#chartWrap"); wrap.innerHTML = '<span class="spin"></span> Loading…';
+  const name = histName, hours = $("#histHours").value;
+  try {
+    const serial = (stat(name) || {}).serialNo || "";
+    const j = await api(`/api/history?name=${encodeURIComponent(name)}&hours=${hours}&serial=${encodeURIComponent(serial)}`);
+    if (name !== histName) return;
+    drawChart(wrap, j.data || []);
+  } catch (e) { wrap.innerHTML = `<span class="msg bad">${esc(e.message)}</span>`; }
+}
+
+function drawChart(wrap, rows) {
+  const pts = rows.map(r => ({ ...r, t: new Date(r.timestamp).getTime(), temperature: +r.temperature, heat: +r.heatSetting, cool: +r.coolSetting }))
+    .filter(r => !isNaN(r.t)).sort((a, b) => a.t - b.t);
+  if (pts.length < 2) { wrap.innerHTML = '<div class="empty">No history for this period.</div>'; return; }
+  const W = 900, H = 340, L = 44, R = 14, T = 12, B = 46, bandH = 10;
+  const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+  const vals = pts.flatMap(p => [p.temperature, p.heat, p.cool]).filter(v => !isNaN(v) && v > 0 && v < 120);
+  let lo = Math.floor(Math.min(...vals) - 1), hi = Math.ceil(Math.max(...vals) + 1);
+  if (hi - lo < 6) { const mid = (hi + lo) / 2; lo = Math.floor(mid - 3); hi = Math.ceil(mid + 3); }
+  const plotB = H - B;
+  const x = t => L + (t - t0) / (t1 - t0) * (W - L - R);
+  const y = v => T + (hi - v) / (hi - lo) * (plotB - T);
+  const css = getComputedStyle(document.documentElement);
+  const c = k => css.getPropertyValue(k).trim();
+
+  const line = (key, step) => {
+    let d = "";
+    pts.forEach((p, i) => {
+      const v = p[key]; if (isNaN(v) || v <= 0) return;
+      if (!d) d = `M${x(p.t).toFixed(1)},${y(v).toFixed(1)}`;
+      else d += step ? `H${x(p.t).toFixed(1)}V${y(v).toFixed(1)}` : `L${x(p.t).toFixed(1)},${y(v).toFixed(1)}`;
+    });
+    return d;
+  };
+  // run-status band
+  let band = "";
+  for (let i = 0; i < pts.length - 1; i++) {
+    const r = pts[i].runStatus || "";
+    const col = r.startsWith("Heat") ? c("--heat") : r.startsWith("Cool") ? c("--cool") : r.startsWith("Fan") ? c("--fan") : null;
+    if (!col) continue;
+    const gap = pts[i + 1].t - pts[i].t; if (gap > 30 * 60e3) continue; // don't paint across data gaps
+    band += `<rect x="${x(pts[i].t).toFixed(1)}" y="${plotB + 6}" width="${Math.max(0.5, x(pts[i + 1].t) - x(pts[i].t)).toFixed(1)}" height="${bandH}" fill="${col}" opacity=".45"/>`;
+  }
+  // grid + axes
+  let grid = "";
+  const stepY = (hi - lo) > 20 ? 5 : 2;
+  for (let v = Math.ceil(lo / stepY) * stepY; v <= hi; v += stepY)
+    grid += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${c("--line")}"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="${c("--muted")}">${v}°</text>`;
+  const spanH = (t1 - t0) / 3600e3;
+  const tickH = spanH <= 8 ? 1 : spanH <= 30 ? 3 : spanH <= 80 ? 12 : 24;
+  const first = new Date(t0); first.setMinutes(0, 0, 0); first.setHours(Math.ceil(first.getHours() / tickH) * tickH);
+  for (let t = first.getTime(); t <= t1; t += tickH * 3600e3) {
+    if (t < t0) continue;
+    const d = new Date(t);
+    const lab = tickH >= 24 || (d.getHours() === 0 && spanH > 30) ? d.toLocaleDateString([], { month: "short", day: "numeric" }) : d.toLocaleTimeString([], { hour: "numeric" });
+    grid += `<line x1="${x(t)}" x2="${x(t)}" y1="${T}" y2="${plotB}" stroke="${c("--line")}" stroke-dasharray="2 3"/><text x="${x(t)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="${c("--muted")}">${lab}</text>`;
+  }
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Temperature history">
+    ${grid}${band}
+    <path d="${line("heat", true)}" fill="none" stroke="${c("--heat")}" stroke-width="2"/>
+    <path d="${line("cool", true)}" fill="none" stroke="${c("--cool")}" stroke-width="2"/>
+    <path d="${line("temperature", false)}" fill="none" stroke="${c("--ink")}" stroke-width="2" stroke-linejoin="round"/>
+    <line id="cursor" y1="${T}" y2="${plotB}" stroke="${c("--muted")}" visibility="hidden"/>
+    <rect x="${L}" y="${T}" width="${W - L - R}" height="${plotB - T + bandH + 6}" fill="transparent" id="hit"/>
+  </svg><div class="tip" id="tip"></div>`;
+
+  const svg = wrap.querySelector("svg"), tip = wrap.querySelector("#tip"), cursor = svg.querySelector("#cursor");
+  svg.querySelector("#hit").addEventListener("mousemove", ev => {
+    const box = svg.getBoundingClientRect();
+    const sx = (ev.clientX - box.left) / box.width * W;
+    const tt = t0 + (sx - L) / (W - L - R) * (t1 - t0);
+    let best = pts[0]; for (const p of pts) if (Math.abs(p.t - tt) < Math.abs(best.t - tt)) best = p;
+    const px = x(best.t);
+    cursor.setAttribute("x1", px); cursor.setAttribute("x2", px); cursor.setAttribute("visibility", "visible");
+    tip.style.display = "block";
+    tip.innerHTML = `<b>${new Date(best.t).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</b><br>
+      Temp ${isNaN(best.temperature) ? "–" : best.temperature.toFixed(1)}° · Heat ${best.heat || "–"}° · Cool ${best.cool || "–"}°<br>${esc(best.runStatus || "Off")}`;
+    const left = px / W * box.width;
+    tip.style.left = Math.min(left + 12, box.width - tip.offsetWidth - 4) + "px";
+    tip.style.top = "8px";
+  });
+  svg.querySelector("#hit").addEventListener("mouseleave", () => { tip.style.display = "none"; cursor.setAttribute("visibility", "hidden"); });
+}
+
+// ------------------------------------------------------------------ misc
+$("#btnRefresh").onclick = () => refresh(true);
+$("#btnQuit").onclick = async () => {
+  if (!confirm("Stop the Pelican GUI app?")) return;
+  try { await api("/api/quit", {}); } catch {}
+  clearInterval(state.timer);
+  document.body.innerHTML = '<div class="empty">Pelican GUI has stopped. You can close this tab.</div>';
+};
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(false); });
+
+(async function init() {
+  try { await loadSession(); } catch (e) { showLogin(e.message); return; }
+  if (!state.sess.signedIn) { showLogin(""); return; }
+  // Page was reloaded while the program is still signed in.
+  enterApp({ domain: state.sess.domain, username: state.sess.username, altName: "" });
+  loadSiteName();
+})();
+</script>
+<script src="features.js"></script>
+</body>
+</html>
