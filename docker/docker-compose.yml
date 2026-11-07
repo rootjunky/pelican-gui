@@ -1,0 +1,48 @@
+# Pelican GUI - Docker Compose
+#
+#   cd docker
+#   cp .env.example .env        # optional: edit port / hostnames / trusted network
+#   docker compose up -d --build
+#   open http://<this-machine's-IP>:8765
+#
+# Stop:   docker compose down        Logs:   docker compose logs -f
+
+services:
+  pelican-gui:
+    build:
+      context: ..                    # project root (pelican_gui.py + static/)
+      dockerfile: docker/Dockerfile
+    image: pelican-gui:latest
+    container_name: pelican-gui
+    restart: unless-stopped
+    init: true                       # clean signal handling / zombie reaping
+    ports:
+      - "${PELICAN_HOST_PORT:-8765}:8765"
+    environment:
+      PELICAN_PORT: "8765"
+      # Hostnames people type to reach the app (IP addresses always work), e.g. nas.local,pelican.home
+      PELICAN_ALLOWED_HOSTS: "${PELICAN_ALLOWED_HOSTS:-}"
+      # Network(s) treated like "the PC running the app": their sign-ins are remembered
+      # in pelican.conf (site list + email, never passwords). Leave empty to keep every
+      # browser's site list in that browser only.
+      PELICAN_TRUSTED_NETS: "${PELICAN_TRUSTED_NETS:-}"
+      # Only used for the address printed in the log
+      PELICAN_PUBLIC_URL: "${PELICAN_PUBLIC_URL:-}"
+      TZ: "${TZ:-America/Chicago}"
+    volumes:
+      - pelican-data:/data           # pelican.conf lives here
+    read_only: true                  # image is immutable; only /data (and /tmp) are writable
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "3"
+
+volumes:
+  pelican-data:

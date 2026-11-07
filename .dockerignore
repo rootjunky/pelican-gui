@@ -1,0 +1,5 @@
+# Build context = project root. Only pelican_gui.py and static/ go into the image.
+*
+!pelican_gui.py
+!static/
+!static/**
