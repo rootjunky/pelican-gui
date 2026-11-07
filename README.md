@@ -91,3 +91,7 @@ pip install playwright && python -m playwright install chromium-headless-shell
 python tests/e2e_test.py                     # 42 end-to-end checks in a real browser
 ```
 `e2e_test.py` reads from Pelican's public demo site. It **intercepts every write** and checks the exact request instead of sending it, so the shared demo is never changed. Screenshots go to `tests/screenshots/`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
