@@ -97,7 +97,7 @@ function readForm(root, specs, data, prefix) {
 // ====================================================================== tabs
 const TAB_INIT = {
   events: initEvents, schedules: initSchedules, usage: initUsage, power: initPower,
-  alerts: initAlerts, site: initSite, sites: initSites,
+  alerts: initAlerts, site: initSite, sites: initSites, zc: initZc,
 };
 function showTab(name) {
   document.querySelectorAll("nav.tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
@@ -1135,3 +1135,263 @@ $("#tab-sites").addEventListener("click", async e => {
     toast(`Switched to ${j.data.altName || j.data.domain}${j.data.viaToken ? " (using a Pelican access token)" : ""}`);
   } catch (err) { toast(err.message); b.disabled = false; b.textContent = "Switch to this site"; }
 });
+
+// ====================================================================== zone controllers
+// Read-only. Status/zones/sensors come from api.cgi (ZoneController); relay
+// outputs and history from Pelican's Site Manager endpoints via the app.
+const ZC = { list: [], cur: null, timer: null, hist: null };
+const ZC_RELAYS = ["y", "y2", "y3", "w", "w2", "w3", "g", "g2"];
+const ZC_ANALOG = ["an1", "an2", "an3", "an4", "s1", "s2"];
+const ZC_PALETTE = ["--accent", "--heat", "--ok", "#9b5bd6", "#17a2a2", "#d04f9c", "#a8743a", "--fan"];
+const zcCol = k => k.startsWith("--") ? getComputedStyle(document.documentElement).getPropertyValue(k).trim() : k;
+const zcHHMM = m => `${pad2(Math.floor(m / 60) % 24)}:${pad2(m % 60)}`;
+const zcNodeQ = z => `node=${encodeURIComponent(z.node)}&ep=${encodeURIComponent(z.epnum)}`;
+
+function initZc() {
+  $("#tab-zc").innerHTML = `
+    <div class="toolbar">
+      <select id="zcPick" aria-label="Zone controller" hidden></select>
+      <button class="btn small" id="zcRefresh">Refresh</button>
+      <span class="hint" id="zcStamp"></span>
+    </div>
+    <div id="zcBody">${spinner("Loading zone controllers…")}</div>`;
+  $("#zcRefresh").onclick = () => { loadZcList(); };
+  $("#zcPick").onchange = e => selectZc(+e.target.value);
+  clearInterval(ZC.timer);
+  ZC.timer = setInterval(() => {
+    if (!document.hidden && !$("#tab-zc").hidden && ZC.cur && ZC.cur.node) loadZcOutputs();
+  }, 60e3);
+  loadZcList();
+}
+
+async function loadZcList() {
+  const body = $("#zcBody"), keep = ZC.cur ? ZC.cur.serialNo || ZC.cur.name : null;
+  try {
+    const d = (await api("/api/zc")).data || {};
+    ZC.list = d.controllers || []; ZC.webError = d.webError || "";
+  } catch (e) { body.innerHTML = errBox(e); return; }
+  if (!ZC.list.length) { body.innerHTML = '<div class="note">This site has no zone controllers.</div>'; return; }
+  const pick = $("#zcPick");
+  pick.innerHTML = ZC.list.map((z, i) => `<option value="${i}">${esc(z.name || z.serialNo)}</option>`).join("");
+  pick.hidden = ZC.list.length < 2;
+  const i = Math.max(0, ZC.list.findIndex(z => (z.serialNo || z.name) === keep));
+  pick.value = i; selectZc(i, !!ZC.hist && keep === (ZC.list[i].serialNo || ZC.list[i].name));
+}
+
+function selectZc(i, keepHistory) {
+  const z = ZC.cur = ZC.list[i];
+  const on = v => /^(on|yes)$/i.test(v || "");
+  const chips = [
+    ["Status", z.statusDisplay], ["Running", z.runStatus], ["Economizer", z.economizer], ["System", z.systemType],
+    ["Stages", [z.heatStages && `heat ${z.heatStages}`, z.coolStages && `cool ${z.coolStages}`, z.fanStages && `fan ${z.fanStages}`].filter(Boolean).join(" · ")],
+    ["Aux heat", z.auxHeat], ["Heat needs fan", z.heatNeedsFan], ["Reversing valve", z.reversingValve],
+  ].filter(([, v]) => v !== undefined && v !== "");
+  const sensors = asList(z.slaves).filter(s => !/input|output|actuator/i.test(s.type || ""));
+  // Live static pressure is in pascals (history uses in. w.c.; 1 in. w.c. = 249.09 Pa).
+  const unit = s => /temp/i.test(s.type) ? "°" : /pressure/i.test(s.type) && !isNaN(+s.value) && s.value !== "" ? ` Pa <span class="hint" style="display:inline">(${(+s.value / 249.09).toFixed(2)} in. w.c.)</span>` : "";
+  const histOld = keepHistory && $("#zcHistPanel") ? $("#zcHistPanel").outerHTML : "";
+  $("#zcBody").innerHTML = `
+    <div class="panel">
+      <h3>${esc(z.name || "Zone controller")}</h3>
+      <span class="hint">${esc([z.description, z.serialNo && `serial ${z.serialNo}`].filter(Boolean).join(" · "))}</span>
+      <div class="summary">${chips.map(([k, v]) => `<span class="chip">${esc(k)} <b>${esc(v)}</b></span>`).join("")}</div>
+      ${sensors.length ? `<div class="zc-grid">${sensors.map(s => `<div class="zc-io"><span class="hint">${esc(s.type)} · ${esc(s.name)}</span><b>${esc(s.value)}${unit(s)}</b></div>`).join("")}</div>` : ""}
+    </div>
+    <div class="panel">
+      <h3>Live outputs</h3>
+      <span class="hint">Relays, analog outputs and economizer state read from the controller. Updates every minute while this tab is open.</span>
+      <div id="zcOut">${z.node ? spinner() : `<div class="note">Live outputs need Pelican's Site Manager login: ${esc(ZC.webError || "the controller was not found there")}</div>`}</div>
+    </div>
+    <div class="panel">
+      <h3>Zones served</h3>
+      ${asList(z.zones).length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Zone</th><th>Serial</th><th>Calling for</th><th>Running</th><th>Waiting</th></tr></thead><tbody>
+        ${asList(z.zones).slice().sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }))
+          .map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.serialNo)}</td><td>${esc(r.request)}</td><td>${esc(r.runStatus)}</td><td>${esc(r.waitingStatus)}</td></tr>`).join("")}
+        </tbody></table></div>` : '<div class="note">Pelican did not list any zones for this controller.</div>'}
+    </div>
+    ${histOld || `<div class="panel" id="zcHistPanel">
+      <h3>History</h3>
+      <span class="hint">One day at a time, in the site's local time. Hover over a chart to read the values.</span>
+      <div class="toolbar">
+        <button class="btn small" id="zcPrev" aria-label="Previous day">◀</button>
+        <input type="date" id="zcDate" aria-label="Day">
+        <button class="btn small" id="zcNext" aria-label="Next day">▶</button>
+        <button class="btn small" id="zcToday">Today</button>
+        <button class="btn small" id="zcCsv" disabled>Download CSV</button>
+      </div>
+      <div id="zcHist">${z.node ? "" : '<div class="note">History needs Pelican\'s Site Manager login.</div>'}</div>
+    </div>`}`;
+  $("#zcStamp").textContent = `Updated ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  const shift = n => { const v = $("#zcDate").value; if (v) loadZcHistory(isoDate(addDays(new Date(v + "T00:00"), n))); };
+  $("#zcPrev").onclick = () => shift(-1);
+  $("#zcNext").onclick = () => shift(1);
+  $("#zcToday").onclick = () => loadZcHistory("");
+  $("#zcDate").onchange = e => loadZcHistory(e.target.value);
+  $("#zcCsv").onclick = zcCsv;
+  if (!z.node) return;
+  loadZcOutputs();
+  if (keepHistory && ZC.hist) renderZcHistory(ZC.hist); else loadZcHistory("");
+}
+
+async function loadZcOutputs() {
+  const z = ZC.cur, box = $("#zcOut"); if (!z || !box) return;
+  let o;
+  try { o = (await api(`/api/zc/outputs?${zcNodeQ(z)}`)).data || {}; } catch (e) { box.innerHTML = errBox(e); return; }
+  if (ZC.cur !== z || !$("#zcOut")) return;
+  const io = (key, unitSuffix) => {
+    const r = o[key]; if (!r) return "";
+    const unused = /^unused$/i.test(r.relayFunction || "");
+    const isOn = /^on$/i.test(r.value);
+    if (unused && (unitSuffix ? !+r.value : !isOn)) return "";
+    const val = unitSuffix ? `${esc(r.value)} ${unitSuffix}` : esc(r.value);
+    return `<div class="zc-io${!unitSuffix && isOn ? " on" : ""}"><span class="hint">${esc(key.toUpperCase())} · ${esc(r.relayFunction)}</span><b>${val}</b></div>`;
+  };
+  const relays = ZC_RELAYS.map(k => io(k)).join(""), analog = ZC_ANALOG.map(k => io(k, "V")).join("");
+  const temps = asList(o.temperatures), devs = asList(o.devices);
+  const econ = o.economizerState !== undefined ? [["Economizer state", o.economizerState], ["Economizer faults", o.economizerFaults],
+    ...(o.economizerTestResultMessage ? [["Economizer test", o.economizerTestResultMessage]] : [])] : [];
+  box.innerHTML = `
+    <h4 class="zc-sub">Relays</h4><div class="zc-grid">${relays || '<span class="hint">No relays in use.</span>'}</div>
+    ${analog ? `<h4 class="zc-sub">Analog outputs and inputs</h4><div class="zc-grid">${analog}</div>` : ""}
+    ${temps.length ? `<h4 class="zc-sub">Temperatures</h4><div class="zc-grid">${temps.map(t => `<div class="zc-io"><span class="hint">${esc(t.name)} · ${esc(t.label)}</span><b>${esc(t.value)}°</b></div>`).join("")}</div>` : ""}
+    <div class="summary" style="margin-top:12px">${[...econ.map(([k, v]) => `<span class="chip">${esc(k)} <b>${esc(v)}</b></span>`),
+      ...devs.map(d => `<span class="chip">${esc(d.name)} <b>${esc(d.status)}</b></span>`)].join("")}</div>`;
+  $("#zcStamp").textContent = `Updated ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+}
+
+async function loadZcHistory(date) {
+  const z = ZC.cur, box = $("#zcHist"); if (!z || !z.node || !box) return;
+  box.innerHTML = spinner("Loading history…");
+  $("#zcCsv").disabled = true;
+  let h;
+  try { h = (await api(`/api/zc/history?${zcNodeQ(z)}&date=${encodeURIComponent(date || "")}`)).data || {}; }
+  catch (e) { box.innerHTML = errBox(e); return; }
+  if (ZC.cur !== z) return;
+  h.controller = z.name; ZC.hist = h;
+  renderZcHistory(h);
+}
+
+function renderZcHistory(h) {
+  const box = $("#zcHist"); if (!box) return;
+  $("#zcDate").value = h.date || "";
+  $("#zcNext").disabled = !!h.isToday;
+  const groups = (h.groups || []).filter(g => g.series.some(s => s.points.length));
+  $("#zcCsv").disabled = !groups.length;
+  if (!groups.length) { box.innerHTML = `<div class="note">No history available for ${esc(h.displayDate || h.date || "this day")}.</div>`; return; }
+  // Today's data stops at "now"; past days run to midnight.
+  const end = h.isToday ? Math.max(...groups.flatMap(g => g.series.filter(s => s.kind === "line").flatMap(s => s.points.map(p => p[0]))), 60) : 1440;
+  box.innerHTML = `<div class="hint" style="margin-bottom:8px">${esc(h.displayDate || h.date)}${h.isToday ? ` · so far (to ${zcHHMM(end)})` : ""}</div>` +
+    groups.map((g, i) => `<h4 class="zc-sub">${esc(g.label)}</h4><div class="chart-wrap" id="zcChart${i}"></div>`).join("");
+  groups.forEach((g, i) => zcChart($(`#zcChart${i}`), g, end));
+}
+
+const ZC_BLOCK_COLORS = [[/aux/i, "--bad"], [/heat/i, "--heat"], [/cool/i, "--cool"], [/econ/i, "--ok"], [/fan/i, "--fan"], [/alarm/i, "#e0a800"]];
+function zcBlockColor(label) { const m = ZC_BLOCK_COLORS.find(([re]) => re.test(label)); return zcCol(m ? m[1] : "--accent"); }
+/** On-periods of a block series: [[start, end, stage], ...] */
+function zcSpans(points, end) {
+  const out = [], pts = points.slice().sort((a, b) => a[0] - b[0]);
+  pts.forEach((p, i) => { if (p[1] > 0 && p[0] < end) out.push([p[0], Math.min(end, i + 1 < pts.length ? pts[i + 1][0] : end), p[1]]); });
+  return out;
+}
+/** Value of a line series at minute m (last reading at or before m, within 30 min). */
+function zcValueAt(points, m) {
+  let lo = 0, hi = points.length - 1, best = -1;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (points[mid][0] <= m) { best = mid; lo = mid + 1; } else hi = mid - 1; }
+  return best >= 0 && m - points[best][0] <= 30 ? points[best][1] : null;
+}
+
+function zcChart(wrap, g, end) {
+  const lines = g.series.filter(s => s.kind === "line" && s.points.length).map(s => ({ ...s, points: s.points.slice().sort((a, b) => a[0] - b[0]) }));
+  const blocks = g.series.filter(s => s.kind === "block" && s.points.length).map(s => ({ ...s, spans: zcSpans(s.points, end) })).filter(s => s.spans.length || s.dataType === "notice");
+  lines.forEach((s, i) => { s.color = zcCol(ZC_PALETTE[i % ZC_PALETTE.length]); });
+  blocks.forEach(s => { s.color = zcBlockColor(s.label); });
+  const unit = g.unit === "°" ? "°" : g.unit === "%" ? "%" : "";
+  const fmt = v => v == null ? "–" : g.key === "pressure" ? v.toFixed(2) : (Math.round(v * 10) / 10) + unit;
+  const W = 900, L = 92, R = 14, T = 10, laneH = 12, lanes = blocks.length;
+  const plotH = lines.length ? 220 : 0, B = 26 + lanes * (laneH + 4);
+  const H = T + plotH + B, plotB = T + plotH;
+  const css = zcCol;
+  const x = m => L + m / 1440 * (W - L - R);
+  let lo = 0, hi = 1;
+  if (lines.length) {
+    const vals = lines.flatMap(s => s.points.map(p => p[1]));
+    lo = Math.min(...vals); hi = Math.max(...vals);
+    const pad = Math.max((hi - lo) * .08, g.key === "pressure" ? .02 : 1);
+    lo -= pad; hi += pad;
+    if (g.key === "economizer") { lo = Math.max(0, Math.min(lo, 0)); hi = Math.min(100, Math.max(hi, 100)); }
+  }
+  const y = v => T + (hi - v) / (hi - lo) * plotH;
+  let grid = "";
+  if (lines.length) {
+    const step = niceStep(hi - lo);
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step)
+      grid += `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="${css("--line")}"/><text x="${L - 6}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="${css("--muted")}">${+v.toFixed(g.key === "pressure" ? 2 : 1)}${unit}</text>`;
+  }
+  for (let hr = 0; hr <= 24; hr += 3) {
+    const lab = hr === 0 || hr === 24 ? "12a" : hr === 12 ? "12p" : hr < 12 ? `${hr}a` : `${hr - 12}p`;
+    grid += `<line x1="${x(hr * 60)}" x2="${x(hr * 60)}" y1="${T}" y2="${H - 22}" stroke="${css("--line")}" stroke-dasharray="2 3"/><text x="${x(hr * 60)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="${css("--muted")}">${lab}</text>`;
+  }
+  let paths = "";
+  for (const s of lines) {
+    let d = "", prev = null;
+    for (const [m, v] of s.points) {
+      d += `${prev === null || m - prev > 30 ? "M" : "L"}${x(m).toFixed(1)},${y(v).toFixed(1)}`; prev = m;
+    }
+    paths += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="1.8" stroke-linejoin="round"/>`;
+  }
+  let lane = "";
+  blocks.forEach((s, i) => {
+    const ly = plotB + 8 + i * (laneH + 4);
+    lane += `<text x="${L - 6}" y="${ly + laneH - 2}" text-anchor="end" font-size="10.5" fill="${css("--muted")}">${esc(s.label.replace(/ (Running|Open|Event)$/i, ""))}</text>
+      <rect x="${L}" y="${ly}" width="${W - L - R}" height="${laneH}" fill="${css("--line")}" opacity=".35" rx="2"/>`;
+    for (const [a, b, stage] of s.spans) {
+      const op = s.maxStages > 1 ? .45 + .45 * Math.min(1, (stage - 1) / Math.max(1, s.maxStages - 1)) : .75;
+      lane += `<rect x="${x(a).toFixed(1)}" y="${ly}" width="${Math.max(1.5, x(b) - x(a)).toFixed(1)}" height="${laneH}" fill="${s.color}" opacity="${op.toFixed(2)}" rx="1"/>`;
+    }
+  });
+  const legend = lines.length ? `<div class="legend">${lines.map(s => `<span><i style="background:${s.color}"></i>${esc(s.label)}</span>`).join("")}</div>` : "";
+  wrap.innerHTML = `${legend}<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(g.label)}">${grid}${paths}${lane}
+    <line class="zc-cursor" y1="${T}" y2="${H - 22}" stroke="${css("--muted")}" visibility="hidden"/>
+    <rect class="zc-hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - 22 - T}" fill="transparent"/></svg><div class="tip"></div>`;
+  const svg = wrap.querySelector("svg"), tip = wrap.querySelector(".tip"), cur = svg.querySelector(".zc-cursor"), hit = svg.querySelector(".zc-hit");
+  hit.addEventListener("mousemove", ev => {
+    const box = svg.getBoundingClientRect();
+    const m = Math.round(Math.max(0, Math.min(1439, ((ev.clientX - box.left) / box.width * W - L) / (W - L - R) * 1440)));
+    const px = x(m);
+    cur.setAttribute("x1", px); cur.setAttribute("x2", px); cur.setAttribute("visibility", "visible");
+    const rows = lines.map(s => `<span style="color:${s.color}">■</span> ${esc(s.label)}: <b>${fmt(zcValueAt(s.points, m))}</b>`);
+    for (const s of blocks) {
+      const sp = s.spans.find(([a, b]) => m >= a && m < Math.max(b, a + 1));
+      if (sp) rows.push(`<span style="color:${s.color}">■</span> ${esc(s.label)}${s.maxStages > 1 ? ` (stage ${sp[2]})` : ""}`);
+    }
+    tip.style.display = "block";
+    tip.innerHTML = `<b>${zcHHMM(m)}</b><br>${rows.join("<br>") || '<span class="hint">No readings</span>'}`;
+    const left = px / W * box.width;
+    tip.style.left = (left + 12 + tip.offsetWidth > box.width ? left - tip.offsetWidth - 12 : left + 12) + "px";
+    tip.style.top = "28px";
+  });
+  hit.addEventListener("mouseleave", () => { tip.style.display = "none"; cur.setAttribute("visibility", "hidden"); });
+}
+
+function zcCsv() {
+  const h = ZC.hist; if (!h) return;
+  const cols = [];
+  for (const g of h.groups || []) for (const s of g.series) if (s.points.length) cols.push({ g, s, map: new Map(s.points.map(p => [p[0], p[1]])) });
+  const end = 1440;
+  const minutes = [...new Set(cols.flatMap(c => c.s.points.map(p => p[0])))].filter(m => m < 1440).sort((a, b) => a - b);
+  const q = v => /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+  const head = ["date", "time", ...cols.map(c => `${c.g.label}: ${c.s.label}${c.g.unit && c.s.kind === "line" ? ` (${c.g.unit})` : c.s.kind === "block" ? " (on/stage)" : ""}`)];
+  const spans = cols.map(c => c.s.kind === "block" ? zcSpans(c.s.points, end) : null);
+  const lines = [head.map(q).join(",")];
+  for (const m of minutes) {
+    lines.push([h.date, zcHHMM(m), ...cols.map((c, i) => {
+      if (spans[i]) { const sp = spans[i].find(([a, b]) => m >= a && m < b); return sp ? String(sp[2]) : "0"; }
+      return c.map.has(m) ? String(c.map.get(m)) : "";
+    })].map(q).join(","));
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([lines.join("\r\n")], { type: "text/csv" }));
+  a.download = `zone-controller-${(h.controller || h.deviceName || "history").replace(/[^\w.-]+/g, "_")}-${h.date}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}

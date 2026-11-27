@@ -165,6 +165,12 @@ table.tbl th.num{text-align:right}
 .sched-row input,.sched-row select{padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);width:100%;min-width:0}
 .sched-row span select{width:auto}
 .bars svg{width:100%;height:auto;display:block}
+.zc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-top:10px}
+.zc-io{border:1px solid var(--line);border-radius:10px;padding:8px 10px;min-width:0}
+.zc-io .hint{display:block;overflow-wrap:anywhere}
+.zc-io b{display:block;font-size:17px;margin-top:2px}
+.zc-io.on{border-color:var(--ok)} .zc-io.on b{color:var(--ok)}
+.zc-sub{margin:16px 0 6px;font-size:13px;color:var(--muted);font-weight:600}
 .cards-mini{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
 @media (max-width:600px){main{padding:16px} header{padding:10px 16px} nav.tabs{padding:0 8px;top:0;position:static}
   .sched-row{grid-template-columns:24px 1fr 1fr 1fr;}}
@@ -192,6 +198,7 @@ table.tbl th.num{text-align:right}
 
 <nav class="tabs" id="tabs" aria-label="Sections">
   <button data-tab="zones" class="on">Zones</button>
+  <button data-tab="zc">Zone controller</button>
   <button data-tab="events">Events</button>
   <button data-tab="schedules">Schedules</button>
   <button data-tab="usage">Usage</button>
@@ -211,6 +218,7 @@ table.tbl th.num{text-align:right}
     <div class="summary" id="summary"></div>
     <div id="grid"></div>
   </section>
+  <section class="tab" id="tab-zc" hidden></section>
   <section class="tab" id="tab-events" hidden></section>
   <section class="tab" id="tab-schedules" hidden></section>
   <section class="tab" id="tab-usage" hidden></section>

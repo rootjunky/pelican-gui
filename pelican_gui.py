@@ -522,6 +522,210 @@ def mysites_token(domain, username, password):
     return None
 
 
+# --------------------------------------------------------------------------- zone controllers
+# The public api.cgi has an (undocumented) ZoneController object with the live
+# status, wired sensors ("slaves") and the zones it serves. Relay outputs and
+# history are only available from the Site Manager web app's own endpoints
+# (ajaxZoneController.cgi), which need a browser-style login (login.cgi + cookie).
+# Everything here is read-only.
+ZC_FIELDS = ["name", "description", "serialNo", "runStatus", "statusDisplay", "economizer",
+             "systemType", "heatStages", "coolStages", "fanStages", "auxHeat", "heatNeedsFan",
+             "reversingValve", "zones", "slaves"]
+_NODE_RE = re.compile(r"^[A-Za-z]{1,8}[0-9A-Za-z]{1,12}$")
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _plain(s):
+    """Pelican labels carry HTML ('Supply<br>Temperature', '<span ..> (wc)</span>')."""
+    s = re.sub(r"<br\s*/?>", " ", str(s or ""), flags=re.I)
+    return re.sub(r"\s+", " ", _TAG_RE.sub("", s).replace("&deg;", "°").replace("&nbsp;", " ")).strip()
+
+
+class SiteWeb:
+    """Cookie session with a site's Site Manager web UI (one per app session)."""
+
+    def __init__(self, domain, username, password):
+        import http.cookiejar
+        self.domain, self._user, self._pass = domain, username, password
+        self._opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        self._lock = threading.Lock()
+        self._logged_in = False
+
+    def _fetch(self, path, data=None, timeout=None):
+        url = f"https://{self.domain}/{path}"
+        body = urllib.parse.urlencode(data).encode() if data is not None else None
+        req = urllib.request.Request(url, data=body, headers={"User-Agent": "PelicanGUI/1.0"})
+        try:
+            with self._opener.open(req, timeout=timeout or max(30, load_conf()["timeout"])) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as e:
+            raise PelicanError(f"HTTP {e.code} from {self.domain} (Site Manager)")
+        except urllib.error.URLError as e:
+            raise PelicanError(f"Cannot reach {self.domain}: {e.reason}")
+        except TimeoutError:
+            raise PelicanError(f"Timed out talking to {self.domain} (Site Manager)")
+
+    def _login(self):
+        if not self._user or not self._pass:
+            raise PelicanError("Zone controller details need your Pelican email and password (sign in again)")
+        page = self._fetch("")
+        m = re.search(r'name="csrf"\s+value="([^"]*)"', page)
+        if not m:
+            raise PelicanError("Pelican's Site Manager login page looks different than expected")
+        page = self._fetch("login.cgi", {"username": self._user, "password": self._pass,
+                                         "Submit": "LOGIN", "csrf": m.group(1)})
+        if 'name="LoginForm"' in page:
+            raise PelicanError("Pelican's Site Manager did not accept this login")
+        self._logged_in = True
+
+    @staticmethod
+    def _expired(text):
+        t = text.lstrip()[:600]
+        return 'url=login.cgi' in t or '"Session Expired"' in t or 'name="LoginForm"' in t
+
+    def get(self, path):
+        """GET a Site Manager page/endpoint, logging in (again) when needed."""
+        with self._lock:
+            if not self._logged_in:
+                self._login()
+            text = self._fetch(path)
+            if self._expired(text):
+                self._login()
+                text = self._fetch(path)
+                if self._expired(text):
+                    raise PelicanError("Pelican's Site Manager session keeps expiring")
+            return text
+
+    def get_json(self, path):
+        text = self.get(path)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            raise PelicanError("Pelican's Site Manager sent an unexpected answer")
+
+
+def site_web():
+    """The SiteWeb for this browser's sign-in (created on first use)."""
+    token = getattr(_current, "token", None)
+    with _sessions_lock:
+        s = _sessions.get(token) if token else None
+        if not s:
+            raise PelicanError("Not signed in", auth=True)
+        if "web" not in s:
+            user, pw = s["account"]
+            s["web"] = SiteWeb(s["creds"][0], user, pw)
+        return s["web"]
+
+
+def _zc_node(node, epnum):
+    node = str(node or "")
+    if not _NODE_RE.match(node):
+        raise PelicanError("Bad zone controller id")
+    try:
+        ep = int(epnum or 1)
+    except (TypeError, ValueError):
+        raise PelicanError("Bad zone controller endpoint")
+    if not 0 < ep < 256:
+        raise PelicanError("Bad zone controller endpoint")
+    return node, ep
+
+
+def get_zone_controllers():
+    try:
+        r = pelican_call("get", "ZoneController", value=";".join(ZC_FIELDS))
+        zcs = as_list(r.get("ZoneController"))
+    except PelicanError as e:
+        if re.search(r"no .*found|unknown object", str(e), re.I):
+            zcs = []
+        else:
+            raise
+    for z in zcs:
+        z["zones"] = as_list(z.get("zones")) if isinstance(z.get("zones"), (dict, list)) else []
+        z["slaves"] = as_list(z.get("slaves")) if isinstance(z.get("slaves"), (dict, list)) else []
+    web_error = ""
+    try:
+        page = site_web().get("zoneList.cgi?section=json")
+        for m in re.finditer(r'<a[^>]*href="zoneAdmin\.cgi\?nodename=([^"&]+)&(?:amp;)?epnum=(\d+)"[^>]*>(.*?)</a>', page, re.S):
+            node, ep, inner = m.group(1), int(m.group(2)), m.group(3)
+            nm = re.search(r'adminNameLabel">([^<]*)<', inner)
+            sn = re.search(r'adminSerialLabel">([^<]*)<', inner)
+            name, serial = (nm.group(1).strip() if nm else ""), (sn.group(1).strip() if sn else "")
+            match = next((z for z in zcs if serial and z.get("serialNo") == serial), None) \
+                or next((z for z in zcs if name and z.get("name") == name), None)
+            if match is None:
+                match = {"name": name, "serialNo": serial, "zones": [], "slaves": []}
+                zcs.append(match)
+            match["node"], match["epnum"] = node, ep
+    except PelicanError as e:
+        web_error = str(e)
+    zcs.sort(key=lambda z: str(z.get("name", "")).lower())
+    return {"controllers": zcs, "webError": web_error}
+
+
+def get_zc_outputs(node, epnum):
+    node, ep = _zc_node(node, epnum)
+    q = urllib.parse.urlencode({"id": f"{node}:{ep}:relays", "nodename": node, "endpoint": ep,
+                                "request": "GetOutputs", "dummy": int(datetime.now().timestamp() * 1000)})
+    d = site_web().get_json(f"ajaxZoneController.cgi?{q}")
+    if d.get("status") not in (0, "0"):
+        raise PelicanError(d.get("msg") or "Pelican could not read the zone controller outputs")
+    for v in d.values():
+        if isinstance(v, dict) and "relayFunction" in v:
+            v["relayFunction"] = _plain(v["relayFunction"])
+    for t in d.get("temperatures") or []:
+        t["label"] = _plain(t.get("label"))
+    return d
+
+
+# Pelican history values: temperatures and static pressure are x10; -220 means "no reading".
+_ZC_SCALE = {"slaveTemp": 10, "splineTemp": 10, "slavePressure": 10, "splinePressure": 10,
+             "slavePressureFilled": 10, "setting": 10}
+_ZC_BLOCKS = {"block", "stagedblock", "notice"}
+
+
+def get_zc_history(node, epnum, date=""):
+    """One day of zone-controller history (site-local). date = YYYY-MM-DD, blank = today."""
+    node, ep = _zc_node(node, epnum)
+    date = str(date or "")
+    if date and not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+        raise PelicanError("Bad date")
+    q = urllib.parse.urlencode({"nodename": node, "epnum": ep, "request": "GetHistory",
+                                "date": date.replace("-", ":"), "dummy": int(datetime.now().timestamp() * 1000)})
+    d = site_web().get_json(f"ajaxZoneController.cgi?{q}")
+    out = {"date": str(d.get("dbDate") or date).replace(":", "-"), "displayDate": d.get("displayDate", ""),
+           "isToday": bool(d.get("isToday")), "deviceName": d.get("deviceName", ""), "groups": []}
+    if d.get("status") not in (0, "0"):
+        return out  # Pelican's "No History Available"
+    for key, g in d.items():
+        if not (key.endswith("Graph") and isinstance(g, dict)):
+            continue
+        group = {"key": key[:-5], "label": _plain(g.get("graphLabel") or key), "unit": _plain(g.get("scaleSuffix")),
+                 "series": []}
+        for ev in g.get("events") or []:
+            dt = ev.get("dataType", "")
+            div = _ZC_SCALE.get(dt, 1)
+            pts = []
+            for p in ev.get("data") or []:
+                try:
+                    m, v = int(p["mts"]), float(p["val"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if div == 10 and v == -220:
+                    continue
+                pts.append([m, round(v / div, 4)])
+            group["series"].append({"name": ev.get("name", ""), "label": _plain(ev.get("label")),
+                                    "kind": "block" if dt in _ZC_BLOCKS else "line", "dataType": dt,
+                                    "maxStages": ev.get("maxStages"), "points": pts})
+        if group["key"] == "pressure":
+            group["unit"] = "in. w.c."
+        elif group["key"] == "economizer":
+            group["unit"] = "%"
+        if group["key"] == "temperature":  # zone temps: Zone 1, Zone 2, ...
+            group["series"].sort(key=lambda s: s["label"].lower())
+        out["groups"].append(group)
+    return out
+
+
 # --------------------------------------------------------------------------- generic API proxy
 _MAX_PARAM = 4000
 
@@ -648,6 +852,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._origin_ok():
             return self._err("Forbidden", 403)
         _current.creds = session_get(self._token())
+        _current.token = self._token()
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
         try:
@@ -664,6 +869,15 @@ class Handler(BaseHTTPRequestHandler):
                 hours = (q.get("hours") or ["24"])[0]
                 serial = (q.get("serial") or [""])[0]
                 return self._ok(get_history(name, hours, serial))
+            if u.path.startswith("/api/zc") and not _current.creds:
+                raise PelicanError("Not signed in", auth=True)
+            if u.path == "/api/zc":
+                return self._ok(get_zone_controllers())
+            arg = lambda k: (q.get(k) or [""])[0]
+            if u.path == "/api/zc/outputs":
+                return self._ok(get_zc_outputs(arg("node"), arg("ep")))
+            if u.path == "/api/zc/history":
+                return self._ok(get_zc_history(arg("node"), arg("ep"), arg("date")))
             return self._static(u.path)
         except PelicanError as e:
             return self._err(e, auth=e.auth)
