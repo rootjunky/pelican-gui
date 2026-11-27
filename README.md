@@ -2,6 +2,22 @@
 
 A local web dashboard for Pelican Wireless thermostats. It uses only the Python standard library.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/zone-controller-dark.png">
+  <img alt="Zone controller tab: live diagram of the air handler with zones, temperatures, coils, blower, economizer and bypass dampers" src="docs/screenshots/zone-controller-light.png">
+</picture>
+
+<details>
+<summary>Zones tab</summary>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/zones-dark.png">
+  <img alt="Zones tab: thermostat cards grouped by building with setpoints, mode, fan, keypad, occupancy and schedule controls" src="docs/screenshots/zones-light.png">
+</picture>
+</details>
+
+<sub>Screenshots: the Zones tab shows Pelican's public demo site. The Zone controller tab uses sample data, because the demo site has no zone controller.</sub>
+
 ## Run
 ```
 python pelican_gui.py          # opens http://<this-PC-ip>:8765, e.g. http://192.168.1.50:8765
