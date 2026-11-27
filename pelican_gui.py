@@ -694,13 +694,14 @@ def get_zc_history(node, epnum, date=""):
     """One day of zone-controller history (site-local). date = YYYY-MM-DD, blank = today."""
     node, ep = _zc_node(node, epnum)
     date = str(date or "")
-    if date and not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+    if date and date != "refresh" and not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
         raise PelicanError("Bad date")
     q = urllib.parse.urlencode({"nodename": node, "epnum": ep, "request": "GetHistory",
                                 "date": date.replace("-", ":"), "dummy": int(datetime.now().timestamp() * 1000)})
     d = site_web().get_json(f"ajaxZoneController.cgi?{q}")
     out = {"date": str(d.get("dbDate") or date).replace(":", "-"), "displayDate": d.get("displayDate", ""),
-           "isToday": bool(d.get("isToday")), "deviceName": d.get("deviceName", ""), "groups": []}
+           "isToday": bool(d.get("isToday")), "deviceName": d.get("deviceName", ""),
+           "refreshTime": d.get("refreshTime", ""), "groups": []}
     if d.get("status") not in (0, "0"):
         return out  # Pelican's "No History Available"
     for key, g in d.items():
@@ -733,6 +734,23 @@ def get_zc_history(node, epnum, date=""):
     return out
 
 
+def get_zc_latest(node, epnum):
+    """Latest reading of each wired sensor on the controller (T1-T3, adapter inputs
+    such as TA1 "Heat Supply", static pressure). Some inputs are only reported in
+    Pelican's history feed; Site Manager's own graph page polls it with date=refresh,
+    and it is current to within a minute or two."""
+    h = get_zc_history(node, epnum, "refresh")
+    sensors = []
+    for g in h["groups"]:
+        if g["key"] == "temperature":  # zone thermostats, not controller sensors
+            continue
+        for s in g["series"]:
+            if s["kind"] == "line" and s["points"] and re.search(r"temp|pressure", s["dataType"], re.I):
+                m, v = max(s["points"], key=lambda p: p[0])
+                sensors.append({"name": s["name"], "label": s["label"], "dataType": s["dataType"], "mts": m, "value": v})
+    return {"isToday": h["isToday"], "time": h.get("refreshTime", ""), "sensors": sensors}
+
+
 # --------------------------------------------------------------------------- generic API proxy
 _MAX_PARAM = 4000
 
@@ -762,6 +780,30 @@ STATIC_TYPES = {
     ".svg": "image/svg+xml",
     ".ico": "image/x-icon",
 }
+
+
+class AppServer(ThreadingHTTPServer):
+    """On Windows, SO_REUSEADDR (Python's default for HTTP servers) lets a second
+    program bind a port that is already in use, and the browser may then reach
+    the other program. Ask for the port exclusively there instead."""
+    daemon_threads = True
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
+def _is_us(port):
+    """True when the program on this local port is Pelican GUI."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=2) as r:
+            return (r.headers.get("Server") or "").startswith("PelicanGUI") or b"<title>Pelican Control</title>" in r.read(4096)
+    except urllib.error.HTTPError as e:
+        return (e.headers.get("Server") or "").startswith("PelicanGUI")
+    except (OSError, ValueError):
+        return False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -883,6 +925,8 @@ class Handler(BaseHTTPRequestHandler):
             arg = lambda k: (q.get(k) or [""])[0]
             if u.path == "/api/zc/outputs":
                 return self._ok(get_zc_outputs(arg("node"), arg("ep")))
+            if u.path == "/api/zc/latest":
+                return self._ok(get_zc_latest(arg("node"), arg("ep")))
             if u.path == "/api/zc/history":
                 return self._ok(get_zc_history(arg("node"), arg("ep"), arg("date")))
             return self._static(u.path)
@@ -1103,16 +1147,32 @@ def main():
     bind = args.bind or ("127.0.0.1" if args.local else "0.0.0.0")
     ip = "127.0.0.1" if args.local else lan_ip()
     url = args.public_url or f"http://{ip}:{args.port}/"
+    server = None
     try:
-        server = ThreadingHTTPServer((bind, args.port), Handler)
+        server = AppServer((bind, args.port), Handler)
     except OSError as e:
         if args.no_browser:  # headless / Docker: a real error
             print(f"{APP_NAME}: cannot listen on {bind}:{args.port}: {e}", file=sys.stderr, flush=True)
             sys.exit(1)
-        # Port taken - most likely the app is already running; just open it.
-        webbrowser.open(url)
-        return
-    print(f"{APP_NAME} running at {url}  (listening on {bind}:{args.port}, config {CONF_PATH})", flush=True)
+        if _is_us(args.port):  # already running: just open it
+            webbrowser.open(url)
+            return
+        # Another program has the port: use the next free one.
+        for port in range(args.port + 1, args.port + 50):
+            try:
+                server = AppServer((bind, port), Handler)
+            except OSError:
+                if _is_us(port):  # an earlier copy moved here: open that one
+                    webbrowser.open(args.public_url or f"http://{ip}:{port}/")
+                    return
+                continue
+            print(f"{APP_NAME}: port {args.port} is used by another program, using {port} instead", flush=True)
+            url = args.public_url or f"http://{ip}:{port}/"
+            break
+        if server is None:
+            print(f"{APP_NAME}: cannot listen on {bind}:{args.port}: {e}", file=sys.stderr, flush=True)
+            sys.exit(1)
+    print(f"{APP_NAME} running at {url}  (listening on {bind}:{server.server_address[1]}, config {CONF_PATH})", flush=True)
     if not args.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:

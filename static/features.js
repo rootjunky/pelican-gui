@@ -1206,6 +1206,9 @@ function selectZc(i, keepHistory) {
     <div class="panel">
       <h3>Unit diagram</h3>
       <span class="hint">The air handler drawn from this controller's live data. Only the parts the controller reports are drawn. Hover over a part to see its source.</span>
+      <label class="zc-layout">Unit layout <select id="zcLayout">
+        <option value="single">Single duct</option><option value="hdcd">Hot deck / cold deck</option></select>
+        <span class="hint" style="display:inline">Pelican doesn't report the unit type. This is saved per controller in this browser.</span></label>
       <div class="zc-diagram" id="zcDiagram"></div>
     </div>
     <div class="panel">
@@ -1253,6 +1256,7 @@ async function loadZcOutputs() {
   if (ZC.cur !== z || !$("#zcOut")) return;
   ZC.out = o; ZC.outFor = z;
   renderZcDiagram();
+  zcRefreshLatest(z);
   const io = (key, unitSuffix) => {
     const r = o[key]; if (!r) return "";
     const unused = /^unused$/i.test(r.relayFunction || "");
@@ -1282,7 +1286,7 @@ const ZC_V_LO = 2, ZC_V_HI = 10; // usual 2–10 V actuator signal
 const zcPct = v => Math.round(Math.max(0, Math.min(1, (v - ZC_V_LO) / (ZC_V_HI - ZC_V_LO))) * 100);
 
 /** Turn the raw controller data into the parts the diagram draws. */
-function zcModel(z, o) {
+function zcModel(z, o, hist, latest) {
   const loaded = !!o;
   o = o || {};
   const parts = (keys, analog) => keys.map(k => {
@@ -1298,7 +1302,30 @@ function zcModel(z, o) {
     ...asList(o.temperatures).map(t => ({ name: t.name, label: t.label || "", value: t.value })),
     ...asList(z.slaves).filter(s => /temp/i.test(s.type || "")).map(s => ({ name: s.name, label: s.type, value: s.value })),
   ];
-  const temp = re => { const t = temps.find(t => re.test(t.label) && t.value !== "" && !isNaN(+t.value)); return t ? { ...t, v: +t.value } : null; };
+  // Next: the per-minute latest readings (/api/zc/latest), then, as a backup,
+  // the latest reading of each wired temperature in today's history
+  // (zone temperatures excluded). Some probes, like heat supply, only show up there.
+  const latestTemps = (latest && latest.isToday ? latest.sensors || [] : []).filter(s => /temp/i.test(s.dataType || ""))
+    .map(s => ({ name: s.name, label: s.label, value: s.value, mts: s.mts, fromFeed: true }));
+  const histTemps = latestTemps.length ? latestTemps : (hist && hist.isToday ? hist.groups || [] : []).filter(g => g.key !== "temperature")
+    .flatMap(g => g.series).filter(s => s.kind === "line" && /temp/i.test(s.dataType || "") && s.points.length)
+    .map(s => { const p = s.points.reduce((a, b) => (b[0] > a[0] ? b : a)); return { name: s.name || s.label, label: s.label, value: p[1], mts: p[0], fromHist: true }; });
+  // Match on type/label and name together: some sites put "Heat Supply" in the name.
+  const okT = t => t.value !== "" && t.value != null && !isNaN(+t.value);
+  const temp = (re, not) => { const t = temps.find(t => okT(t) && re.test(`${t.label} ${t.name}`) && !(not && not.test(`${t.label} ${t.name}`))); return t ? { ...t, v: +t.value } : null; };
+  const HEAT_T = /heat|hot.?deck|hw|boiler/i;
+  const T = {
+    heatSupply: temp(/(heat|hot.?deck|hw|boiler).*(supply|discharge|deck)|(supply|discharge).*(heat|hot)|hot.?deck/i),
+    supply: temp(/supply|discharge|cold.?deck/i, HEAT_T), ret: temp(/return/i), outside: temp(/outside|outdoor/i),
+  };
+  // Any other temperature sensor still gets shown under the diagram.
+  const used = new Set(Object.values(T).filter(Boolean).map(t => t.name));
+  // History only fills gaps: a probe the live data doesn't have at all.
+  temps.push(...histTemps);
+  if (!T.heatSupply) T.heatSupply = temp(/(heat|hot.?deck|hw|boiler).*(supply|discharge|deck)|(supply|discharge).*(heat|hot)|hot.?deck/i);
+  ["supply", "ret", "outside"].forEach(k => { if (!T[k]) T[k] = temp(k === "supply" ? /supply|discharge|cold.?deck/i : k === "ret" ? /return/i : /outside|outdoor/i, k === "supply" ? HEAT_T : null); });
+  Object.values(T).forEach(t => t && used.add(t.name));
+  const extraTemps = temps.filter(t => !t.fromHist && !t.fromFeed).filter(t => okT(t) && !used.has(t.name) && (used.add(t.name), true)).map(t => ({ ...t, v: +t.value }));
   const pres = asList(z.slaves).find(s => /pressure/i.test(s.type || "") && s.value !== "" && !isNaN(+s.value));
   const cool = rel(/cool/i).filter(r => !/econ/i.test(r.fn));
   const heat = rel(/heat|aux/i);
@@ -1306,8 +1333,7 @@ function zcModel(z, o) {
   const status = `${z.statusDisplay || ""} ${z.runStatus || ""}`;
   return {
     loaded,
-    supply: temp(/^(?!.*heat).*supply/i), ret: temp(/return/i), outside: temp(/outside|outdoor/i),
-    heatSupply: temp(/heat.*supply/i),
+    ...T, extraTemps,
     pressure: pres ? { name: pres.name, pa: +pres.value, inwc: +pres.value / 249.09 } : null,
     cool, heat, fan,
     coolOn: cool.filter(r => r.on).length,
@@ -1329,7 +1355,13 @@ function zcModel(z, o) {
 
 function renderZcDiagram() {
   const box = $("#zcDiagram"), z = ZC.cur; if (!box || !z) return;
-  const m = zcModel(z, ZC.out);
+  const m = zcModel(z, ZC.out, ZC.histToday && ZC.histToday.z === z ? ZC.histToday.h : null,
+    ZC.latest && ZC.latest.z === z && Date.now() - ZC.latest.at < 5 * 60 * 1000 ? ZC.latest.d : null);
+  // Hot deck / cold deck can't be told from the data, so it's a per-controller choice.
+  const lkey = `pelican.zcLayout.${z.serialNo || z.node || z.name}`;
+  let hd = false; try { hd = localStorage.getItem(lkey) === "hdcd"; } catch (e) { /* storage blocked */ }
+  const lsel = $("#zcLayout");
+  if (lsel) { lsel.value = hd ? "hdcd" : "single"; lsel.onchange = () => { try { localStorage.setItem(lkey, lsel.value); } catch (e) { /* ignore */ } renderZcDiagram(); }; }
   // Zones wrap into rows (at most 8 per row, balanced) so names stay readable;
   // everything below the zone rows moves down by Y.
   const W = 980, n = m.zones.length, zTop = 8, x0 = 84, gap = 8, zh = 52;
@@ -1374,11 +1406,18 @@ function renderZcDiagram() {
   // Return and supply ducts run off the right-hand edge (open ends).
   const ret = [[150, Y + 172], [150, Y + 40], [W, Y + 40], [W, Y + 92], [230, Y + 92], [230, Y + 172]];
   const sup = [[758, Y + 212], [W, Y + 212], [W, Y + 288], [758, Y + 288]];
+  // Hot deck / cold deck: two discharge ducts, hot on top, cold below.
+  const hot = [[758, Y + 182], [W, Y + 182], [W, Y + 238], [758, Y + 238]];
+  const cold = [[758, Y + 262], [W, Y + 262], [W, Y + 318], [758, Y + 318]];
   const oa = [[72, Y + 200], [10, Y + 200], [10, Y + 300], [72, Y + 300]];
   g += `
     <rect class="zcd-case" x="70" y="${Y + 170}" width="690" height="160" rx="10"/>
     ${duct(ret, ret.slice(0, 3), ret.slice(3))}
-    ${duct(sup, sup.slice(0, 2), sup.slice(2))}
+    ${hd ? duct(hot, hot.slice(0, 2), hot.slice(2)) + duct(cold, cold.slice(0, 2), cold.slice(2))
+          + `<line class="zcd-edge" x1="446" x2="760" y1="${Y + 250}" y2="${Y + 250}"/>
+             <text class="zcd-tag" x="700" y="${Y + 240}" text-anchor="middle">HOT DECK</text>
+             <text class="zcd-tag" x="700" y="${Y + 268}" text-anchor="middle">COLD DECK</text>`
+        : duct(sup, sup.slice(0, 2), sup.slice(2))}
     ${duct(oa, [[70, Y + 200], ...oa.slice(1, 3), [70, Y + 300]])}
     ${[0, 1, 2, 3, 4].map(i => `<line class="zcd-louver" x1="14" x2="40" y1="${Y + 208 + i * 20}" y2="${Y + 218 + i * 20}"/>`).join("")}`;
   const dmp = m.damperPos || m.damper;
@@ -1386,28 +1425,32 @@ function renderZcDiagram() {
   const oaFlow = m.fanOn && (pct == null || pct > 0);
   g += flow(`M${W},${Y + 66} L190,${Y + 66} L190,${Y + 200}`, m.fanOn)
      + flow(`M16,${Y + 250} L230,${Y + 250}`, oaFlow)
-     + flow(`M240,${Y + 250} L${W},${Y + 250}`, m.fanOn);
+     + (hd ? flow(`M240,${Y + 250} L446,${Y + 250}`, m.fanOn)
+           + flow(`M446,${Y + 250} C470,${Y + 250} 466,${Y + 210} 492,${Y + 210} L${W},${Y + 210}`, m.fanOn)
+           + flow(`M446,${Y + 250} C470,${Y + 250} 466,${Y + 290} 492,${Y + 290} L${W},${Y + 290}`, m.fanOn)
+        : flow(`M240,${Y + 250} L${W},${Y + 250}`, m.fanOn));
   // Direction arrows (0° = right, 90° = down, 180° = left).
   const arrow = (x, y, deg, on) => `<path class="zcd-arrow${on ? " on" : ""}" d="M-6,-9 L6,0 L-6,9" transform="translate(${x},${y}) rotate(${deg})"/>`;
   g += [[930, Y + 66, 180], [740, Y + 66, 180], [330, Y + 66, 180], [190, Y + 130, 90]].map(([x, y, d]) => arrow(x, y, d, m.fanOn)).join("")
      + arrow(56, Y + 250, 0, oaFlow)
-     + [[800, Y + 250, 0], [880, Y + 250, 0], [950, Y + 250, 0]].map(([x, y, d]) => arrow(x, y, d, m.fanOn)).join("");
+     + (hd ? [Y + 210, Y + 290] : [Y + 250]).flatMap(y => [800, 880, 950].map(x => arrow(x, y, 0, m.fanOn))).join("");
 
   // --- bypass damper: a duct from the supply duct up to the return duct.
   // The blade angle assumes Pelican's usual bypass signal, 2 V = open and
   // 10 V = closed (it can be set the other way round); the badge shows the volts.
   const bp = m.bypass, bx = 800, bw = 50, bcx = bx + bw / 2;
+  const bBot = Y + (hd ? 182 : 212), bMid = Math.round((Y + 92 + bBot) / 2), bLow = hd ? Y + 210 : Y + 246;
   if (bp) {
     const bpOpen = 100 - zcPct(bp.v), bpFlow = m.fanOn && bpOpen > 0;
-    g += `<rect class="zcd-fill" x="${bx}" y="${Y + 90}" width="${bw}" height="${124}"/>
-      <line class="zcd-edge" x1="${bx}" x2="${bx}" y1="${Y + 92}" y2="${Y + 212}"/>
-      <line class="zcd-edge" x1="${bx + bw}" x2="${bx + bw}" y1="${Y + 92}" y2="${Y + 212}"/>
-      ${flow(`M${bcx},${Y + 246} L${bcx},${Y + 70}`, bpFlow)}
-      ${arrow(bcx, Y + 190, -90, bpFlow)}${arrow(bcx, Y + 112, -90, bpFlow)}
+    g += `<rect class="zcd-fill" x="${bx}" y="${Y + 90}" width="${bw}" height="${bBot - Y - 88}"/>
+      <line class="zcd-edge" x1="${bx}" x2="${bx}" y1="${Y + 92}" y2="${bBot}"/>
+      <line class="zcd-edge" x1="${bx + bw}" x2="${bx + bw}" y1="${Y + 92}" y2="${bBot}"/>
+      ${flow(`M${bcx},${bLow} L${bcx},${Y + 70}`, bpFlow)}
+      ${arrow(bcx, bBot - 22, -90, bpFlow)}${arrow(bcx, Y + 112, -90, bpFlow)}
       <g class="zcd-damper bypass">${tip(`Bypass damper: ${bp.key.toUpperCase()} · ${bp.fn} = ${bp.raw} V (blade drawn ≈${bpOpen}% open, assuming 2 V open / 10 V closed)`)}
-        <line x1="-19" y1="0" x2="19" y2="0" transform="translate(${bcx},${Y + 152}) rotate(${(bpOpen * .9).toFixed(0)})"/></g>
-      <line class="zcd-lead" x1="${bx - 16}" x2="${bx - 2}" y1="${Y + 152}" y2="${Y + 152}"/>
-      ${badge(bx - 78, Y + 140, "BYPASS DAMPER", `${bp.raw} V`, "", "", `${bp.key.toUpperCase()} · ${bp.fn}`)}`;
+        <line x1="-19" y1="0" x2="19" y2="0" transform="translate(${bcx},${bMid}) rotate(${(bpOpen * .9).toFixed(0)})"/></g>
+      <line class="zcd-lead" x1="${bx - 16}" x2="${bx - 2}" y1="${bMid}" y2="${bMid}"/>
+      ${badge(bx - 78, bMid - 12, "BYPASS DAMPER", `${bp.raw} V`, "", "", `${bp.key.toUpperCase()} · ${bp.fn}`)}`;
   }
   g += `${m.ret ? "" : `<text class="zcd-tag" x="500" y="${Y + 32}" text-anchor="middle">RETURN AIR</text>`}
     <text class="zcd-name" x="250" y="${Y + 160}">${esc(z.name || "Zone controller")}${m.status ? ` · ${esc(m.status)}` : ""}</text>`;
@@ -1428,23 +1471,27 @@ function renderZcDiagram() {
   // --- heating coil
   const vh = m.varHeat, vhPct = vh ? zcPct(vh.v) : 0;
   const heatActive = m.heatOn > 0 || vhPct > 0;
-  if (m.heat.length || vh || m.heatStages) {
+  // Single duct: heat coil then cool coil, full height. Hot deck / cold deck:
+  // heat coil in the top deck, cool coil (offset right) in the bottom deck.
+  const hc = hd ? { x: 480, y: Y + 178, h: 66, n: 3 } : { x: 300, y: Y + 182, h: 136, n: 6 };
+  const cc = hd ? { x: 600, y: Y + 256, h: 66, n: 3 } : { x: 396, y: Y + 182, h: 136, n: 6 };
+  if (m.heat.length || vh || m.heatStages || (hd && m.heatSupply)) {
     g += `<g class="zcd-coil heat${heatActive ? " on" : ""}">${tip(["Heat", ...m.heat.map(r => `${r.key.toUpperCase()} · ${r.fn}: ${r.on ? "On" : "Off"}`), vh && `${vh.key.toUpperCase()} · ${vh.fn}: ${vh.raw} V (≈${vhPct}%)`].filter(Boolean).join("\n"))}
-      <rect x="300" y="${Y + 182}" width="56" height="136" rx="4"/>
-      ${[0, 1, 2, 3, 4, 5].map(i => `<path d="M306,${Y + 196 + i * 22} q11,-8 22,0 t22,0"/>`).join("")}</g>`;
+      <rect x="${hc.x}" y="${hc.y}" width="56" height="${hc.h}" rx="4"/>
+      ${Array.from({ length: hc.n }, (_, i) => `<path d="M${hc.x + 6},${hc.y + 14 + i * 22} q11,-8 22,0 t22,0"/>`).join("")}</g>`;
     const hv = m.heat.length ? (m.heatOn ? (m.heat.length > 1 ? `Stage ${m.heatOn} of ${m.heat.length}` : "On") : "Off") : "";
-    g += label(328, Y + 352, "HEAT", [hv, vh && `${vhPct}%`].filter(Boolean).join(" · ") || notReported, heatActive ? "heat" : "");
-    if (vh) g += `<text class="zcd-sub" x="328" y="${Y + 386}" text-anchor="middle">${esc(`${vh.raw} V`)}</text>`;
+    g += label(hc.x + 28, Y + 352, "HEAT", [hv, vh && `${vhPct}%`].filter(Boolean).join(" · ") || notReported, heatActive ? "heat" : "");
+    if (vh) g += `<text class="zcd-sub" x="${hc.x + 28}" y="${Y + 386}" text-anchor="middle">${esc(`${vh.raw} V`)}</text>`;
   }
 
   // --- cooling coil with stage pips
   if (m.cool.length || m.coolStages) {
     g += `<g class="zcd-coil cool${m.coolOn ? " on" : ""}">${tip(["Cooling", ...m.cool.map(r => `${r.key.toUpperCase()} · ${r.fn}: ${r.on ? "On" : "Off"}`)].join("\n"))}
-      <rect x="396" y="${Y + 182}" width="56" height="136" rx="4"/>
-      ${[0, 1, 2, 3, 4, 5].map(i => `<path d="M402,${Y + 196 + i * 22} l11,-8 l11,8 l11,-8 l11,8"/>`).join("")}</g>`;
+      <rect x="${cc.x}" y="${cc.y}" width="56" height="${cc.h}" rx="4"/>
+      ${Array.from({ length: cc.n }, (_, i) => `<path d="M${cc.x + 6},${cc.y + 14 + i * 22} l11,-8 l11,8 l11,-8 l11,8"/>`).join("")}</g>`;
     const stages = m.cool.length || m.coolStages;
-    g += label(424, Y + 352, "COOL", m.cool.length ? (m.coolOn ? (stages > 1 ? `Stage ${m.coolOn} of ${stages}` : "On") : "Off") : notReported, m.coolOn ? "cool" : "");
-    g += `<g transform="translate(${424 - (stages - 1) * 9},${Y + 382})">${Array.from({ length: stages }, (_, i) =>
+    g += label(cc.x + 28, Y + 352, "COOL", m.cool.length ? (m.coolOn ? (stages > 1 ? `Stage ${m.coolOn} of ${stages}` : "On") : "Off") : notReported, m.coolOn ? "cool" : "");
+    g += `<g transform="translate(${cc.x + 28 - (stages - 1) * 9},${Y + 382})">${Array.from({ length: stages }, (_, i) =>
       `<circle class="zcd-pip${m.cool[i] && m.cool[i].on ? " on" : ""}" cx="${i * 18}" cy="0" r="5">${tip(m.cool[i] ? `${m.cool[i].key.toUpperCase()} · ${m.cool[i].fn}` : `Stage ${i + 1}`)}</circle>`).join("")}</g>`;
   }
 
@@ -1452,7 +1499,8 @@ function renderZcDiagram() {
   // The scroll widens clockwise from the cut-off on the right round to the
   // top, and its outlet is centred on the supply duct line (fy) so the air
   // leaves the blower straight towards the supply duct.
-  const fy = Y + 250, fx = 570, cy = fy + 32, r0 = 36, r1 = 54;
+  // Hot deck / cold deck units are blow-through: the fan comes before the coils.
+  const fy = Y + 250, fx = hd ? 380 : 570, cy = fy + 32, r0 = 36, r1 = 54;
   const pt = (r, deg) => [fx + r * Math.cos(deg * Math.PI / 180), cy + r * Math.sin(deg * Math.PI / 180)];
   const scroll = Array.from({ length: 28 }, (_, i) => pt(r0 + (r1 - r0) * i / 27, 270 * i / 27));
   const mouth = fx + 66, outTop = cy - r1, outBot = cy - 10; // outlet spans fy-22 .. fy+22
@@ -1466,19 +1514,28 @@ function renderZcDiagram() {
       <circle class="zcd-rim" cx="${fx}" cy="${cy}" r="26"/><circle class="zcd-rim" cx="${fx}" cy="${cy}" r="17"/>${blades}
       <circle class="zcd-hub" cx="${fx}" cy="${cy}" r="5"/><line class="zcd-spoke" x1="${fx}" y1="${cy}" x2="${fx}" y2="${cy - 17}"/>
       <line class="zcd-spoke" x1="${fx}" y1="${cy}" x2="${fx + 15}" y2="${cy + 8.5}"/><line class="zcd-spoke" x1="${fx}" y1="${cy}" x2="${fx - 15}" y2="${cy + 8.5}"/></g></g>`;
-  g += label(570, Y + 352, "SUPPLY FAN", m.fan.length || m.loaded ? (m.fanOn ? "On" : "Off") : m.fanOn ? "On (status)" : "–", m.fanOn ? "ok" : "");
+  g += label(fx, Y + 352, "SUPPLY FAN", m.fan.length || m.loaded ? (m.fanOn ? "On" : "Off") : m.fanOn ? "On (status)" : "–", m.fanOn ? "ok" : "");
 
   // --- sensors, each on its own duct
-  if (m.supply) g += badge(bp ? 916 : 830, Y + 168, "SUPPLY AIR", t1(m.supply.v), m.ret ? `ΔT ${m.supply.v - m.ret.v >= 0 ? "+" : "−"}${Math.abs(m.supply.v - m.ret.v).toFixed(1)}° vs return` : "",
-    m.ret && m.supply.v < m.ret.v - 1 ? "cool" : m.ret && m.supply.v > m.ret.v + 1 ? "heat" : "", `${m.supply.name} · ${m.supply.label}`);
-  if (m.pressure) g += badge(830, Y + 318, "STATIC", `${m.pressure.inwc.toFixed(2)}″ wc`, `${Math.round(m.pressure.pa)} Pa`, "", `${m.pressure.name} · Pressure (live value is in Pa)`);
+  const dT = t => m.ret ? `ΔT ${t.v - m.ret.v >= 0 ? "+" : "−"}${Math.abs(t.v - m.ret.v).toFixed(1)}° vs return` : "";
+  const dCls = t => m.ret && t.v < m.ret.v - 1 ? "cool" : m.ret && t.v > m.ret.v + 1 ? "heat" : "";
+  const asOf = t => t.fromFeed ? `${t.name} · ${zcHHMM(t.mts)}` : t.fromHist ? `history · ${zcHHMM(t.mts)}` : "";
+  const src = t => t.fromFeed ? `${t.name} · ${t.label}: reading at ${zcHHMM(t.mts)}, updated every minute. Pelican reports this input only in its history feed, not in the live outputs.`
+    : t.fromHist ? `${t.label} · latest reading in today's history (${zcHHMM(t.mts)}). Not in the live sensor list.` : `${t.name} · ${t.label}`;
+  if (hd) {
+    g += badge(bp ? 916 : 830, Y + 140, "HOT DECK", m.heatSupply ? t1(m.heatSupply.v) : "–", m.heatSupply ? asOf(m.heatSupply) || dT(m.heatSupply) : "not reported",
+      m.heatSupply ? dCls(m.heatSupply) : "", m.heatSupply ? src(m.heatSupply) : "No heat supply / hot deck temperature sensor found");
+    g += badge(782, Y + 362, "COLD DECK", m.supply ? t1(m.supply.v) : "–", m.supply ? asOf(m.supply) || dT(m.supply) : "not reported",
+      m.supply ? dCls(m.supply) : "", m.supply ? src(m.supply) : "No supply / cold deck temperature sensor found");
+  } else if (m.supply) g += badge(bp ? 916 : 830, Y + 168, "SUPPLY AIR", t1(m.supply.v), dT(m.supply), dCls(m.supply), src(m.supply));
+  if (m.pressure) g += badge(hd ? 916 : 830, hd ? Y + 362 : Y + 318, "STATIC", `${m.pressure.inwc.toFixed(2)}″ wc`, `${Math.round(m.pressure.pa)} Pa`, "", `${m.pressure.name} · Pressure (live value is in Pa)`);
   if (m.ret) g += badge(500, Y + 66, "RETURN AIR", t1(m.ret.v), "", "", `${m.ret.name} · ${m.ret.label}`);
   // Outside badge sits clear of the drawing, above the intake, with a lead to it.
   g += m.outside ? `<line class="zcd-lead" x1="40" x2="40" y1="${Y + 162}" y2="${Y + 200}"/>` + badge(66, Y + 140, "OUTSIDE AIR", t1(m.outside.v), "", "", `${m.outside.name} · ${m.outside.label}`)
                  : `<text class="zcd-tag" x="10" y="${Y + 190}">OUTSIDE AIR</text>`;
-  if (m.heatSupply) g += badge(328, Y + 124, "HEAT SUPPLY", t1(m.heatSupply.v), "", "", `${m.heatSupply.name} · ${m.heatSupply.label}`);
+  if (m.heatSupply && !hd) g += badge(328, Y + 124, "HEAT SUPPLY", t1(m.heatSupply.v), "", dCls(m.heatSupply), src(m.heatSupply));
 
-  const aria = [`${z.name || "Zone controller"} air handler`, m.status, m.supply && `supply ${t1(m.supply.v)}`, m.ret && `return ${t1(m.ret.v)}`,
+  const aria = [`${z.name || "Zone controller"} air handler`, m.status, m.supply && `${hd ? "cold deck" : "supply"} ${t1(m.supply.v)}`, m.heatSupply && `${hd ? "hot deck" : "heat supply"} ${t1(m.heatSupply.v)}`, m.ret && `return ${t1(m.ret.v)}`,
     m.outside && `outside ${t1(m.outside.v)}`, `fan ${m.fanOn ? "on" : "off"}`, m.cool.length && `cooling ${m.coolOn ? `stage ${m.coolOn}` : "off"}`,
     (m.heat.length || vh) && `heat ${heatActive ? "on" : "off"}`, pct != null && `economizer damper ${pct}%`].filter(Boolean).join(", ");
   const go = e => {
@@ -1488,6 +1545,7 @@ function renderZcDiagram() {
   };
   box.onclick = go; box.onkeydown = go;
   box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}">${g}</svg>
+    ${m.extraTemps.length ? `<div class="hint">Other temperature sensors: ${m.extraTemps.map(t => `${esc(t.name)} ${esc(t.label)} <b>${esc(t1(t.v))}</b>`).join(" · ")}</div>` : ""}
     ${m.loaded ? "" : `<div class="hint">${z.node ? "Waiting for live relay data…" : "Relay states need the Site Manager login, so heat, cool and fan come from the status text."}</div>`}`;
 }
 
@@ -1519,7 +1577,34 @@ async function loadZcHistory(date) {
   catch (e) { box.innerHTML = errBox(e); return; }
   if (ZC.cur !== z) return;
   h.controller = z.name; ZC.hist = h;
+  if (h.isToday) { ZC.histToday = { z, at: Date.now(), h }; renderZcDiagram(); }
   renderZcHistory(h);
+}
+
+/** Latest reading of each controller sensor, every minute with the outputs.
+ *  Adapter inputs such as TA1 "Heat Supply" are only in Pelican's history feed
+ *  (Site Manager's own graph polls it the same way). If this fails, the diagram
+ *  falls back to the full history fetch below. */
+async function zcRefreshLatest(z) {
+  try {
+    const d = (await api(`/api/zc/latest?${zcNodeQ(z)}`)).data || {};
+    if (ZC.cur !== z) return;
+    ZC.latest = { z, at: Date.now(), d }; renderZcDiagram();
+  } catch (e) {
+    if (ZC.cur === z) { ZC.latest = null; zcRefreshTodayHist(z); }
+  }
+}
+
+/** Today's history in the background, for sensors (like a heat supply probe)
+ *  that appear in history but not in the live sensor list. At most every 5 min. */
+async function zcRefreshTodayHist(z) {
+  const t = ZC.histToday;
+  if (!z || !z.node || (t && t.z === z && Date.now() - t.at < 5 * 60 * 1000)) return;
+  ZC.histToday = { z, at: Date.now(), h: t && t.z === z ? t.h : null };
+  try {
+    const h = (await api(`/api/zc/history?${zcNodeQ(z)}&date=`)).data || {};
+    if (ZC.cur === z) { ZC.histToday = { z, at: Date.now(), h }; renderZcDiagram(); }
+  } catch (e) { /* the diagram just goes without */ }
 }
 
 function renderZcHistory(h) {
