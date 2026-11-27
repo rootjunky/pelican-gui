@@ -165,6 +165,12 @@ table.tbl th.num{text-align:right}
 .sched-row input,.sched-row select{padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);width:100%;min-width:0}
 .sched-row span select{width:auto}
 .bars svg{width:100%;height:auto;display:block}
+.toolbar select.zc-pick{font-size:15px;font-weight:650;padding:8px 36px 8px 14px;border:2px solid var(--accent);border-radius:10px;
+  background:var(--cool-soft) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%232f6fde' stroke-width='2'/%3E%3C/svg%3E") no-repeat right 12px center;
+  color:var(--ink);appearance:none;cursor:pointer;min-width:180px}
+.toolbar select.zc-pick:hover{box-shadow:0 0 0 3px var(--cool-soft)}
+.toolbar select.zc-pick:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.zc-pick-label{font-size:13px;font-weight:650;color:var(--muted)}
 .zc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-top:10px}
 .zc-io{border:1px solid var(--line);border-radius:10px;padding:8px 10px;min-width:0}
 .zc-io .hint{display:block;overflow-wrap:anywhere}

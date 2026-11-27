@@ -1152,7 +1152,8 @@ const zcNodeQ = z => `node=${encodeURIComponent(z.node)}&ep=${encodeURIComponent
 function initZc() {
   $("#tab-zc").innerHTML = `
     <div class="toolbar">
-      <select id="zcPick" aria-label="Zone controller" hidden></select>
+      <label class="zc-pick-label" for="zcPick" id="zcPickLabel" hidden>Zone controller</label>
+      <select id="zcPick" class="zc-pick" hidden></select>
       <button class="btn small" id="zcRefresh">Refresh</button>
       <span class="hint" id="zcStamp"></span>
     </div>
@@ -1176,8 +1177,8 @@ async function loadZcList() {
   if (!ZC.list.length && auto && !$("#tab-zc").hidden) { showTab("zones"); return; }
   if (!ZC.list.length) { body.innerHTML = '<div class="note">This site has no zone controllers.</div>'; return; }
   const pick = $("#zcPick");
-  pick.innerHTML = ZC.list.map((z, i) => `<option value="${i}">${esc(z.name || z.serialNo)}</option>`).join("");
-  pick.hidden = ZC.list.length < 2;
+  pick.innerHTML = ZC.list.map((z, i) => `<option value="${i}">${esc(z.name || z.serialNo)}  (${i + 1} of ${ZC.list.length})</option>`).join("");
+  pick.hidden = $("#zcPickLabel").hidden = ZC.list.length < 2;
   const i = Math.max(0, ZC.list.findIndex(z => (z.serialNo || z.name) === keep));
   pick.value = i; selectZc(i, !!ZC.hist && keep === (ZC.list[i].serialNo || ZC.list[i].name));
 }
