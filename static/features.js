@@ -1448,12 +1448,24 @@ function renderZcDiagram() {
       `<circle class="zcd-pip${m.cool[i] && m.cool[i].on ? " on" : ""}" cx="${i * 18}" cy="0" r="5">${tip(m.cool[i] ? `${m.cool[i].key.toUpperCase()} · ${m.cool[i].fn}` : `Stage ${i + 1}`)}</circle>`).join("")}</g>`;
   }
 
-  // --- supply fan
-  const fy = Y + 250;
+  // --- supply fan: centrifugal blower (scroll housing + squirrel-cage wheel)
+  // The scroll widens clockwise from the cut-off on the right round to the
+  // top, and its outlet is centred on the supply duct line (fy) so the air
+  // leaves the blower straight towards the supply duct.
+  const fy = Y + 250, fx = 570, cy = fy + 32, r0 = 36, r1 = 54;
+  const pt = (r, deg) => [fx + r * Math.cos(deg * Math.PI / 180), cy + r * Math.sin(deg * Math.PI / 180)];
+  const scroll = Array.from({ length: 28 }, (_, i) => pt(r0 + (r1 - r0) * i / 27, 270 * i / 27));
+  const mouth = fx + 66, outTop = cy - r1, outBot = cy - 10; // outlet spans fy-22 .. fy+22
+  const housing = `M${scroll.map(p => p.map(v => v.toFixed(1)).join(",")).join(" L")} L${mouth},${outTop} M${mouth},${outBot} L${fx + r0},${outBot} L${fx + r0},${cy}`;
+  const blades = Array.from({ length: 24 }, (_, i) => { const a = i * 15, [x1, y1] = pt(18, a), [x2, y2] = pt(26, a + 16);
+    return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"/>`; }).join("");
   g += `<g class="zcd-fan${m.fanOn ? " on" : ""}">${tip(m.fan.length ? m.fan.map(r => `${r.key.toUpperCase()} · ${r.fn}: ${r.on ? "On" : "Off"}`).join("\n") : `Fan (from status: ${m.status || "unknown"})`)}
-    <circle cx="570" cy="${fy}" r="50"/>
-    <g class="zcd-blades" style="transform-origin:570px ${fy}px">${[0, 72, 144, 216, 288].map(a => `<path transform="rotate(${a} 570 ${fy})" d="M570,${fy} C560,${fy - 24} 572,${fy - 40} 588,${fy - 38} C584,${fy - 22} 580,${fy - 10} 570,${fy}Z"/>`).join("")}
-      <circle cx="570" cy="${fy}" r="7"/></g></g>`;
+    <path class="zcd-housing-fill" d="M${scroll.map(p => p.map(v => v.toFixed(1)).join(",")).join(" L")} L${mouth},${outTop} L${mouth},${outBot} L${fx + r0},${outBot} Z"/>
+    <path class="zcd-housing" d="${housing}"/>
+    <g class="zcd-blades" style="transform-origin:${fx}px ${cy}px">
+      <circle class="zcd-rim" cx="${fx}" cy="${cy}" r="26"/><circle class="zcd-rim" cx="${fx}" cy="${cy}" r="17"/>${blades}
+      <circle class="zcd-hub" cx="${fx}" cy="${cy}" r="5"/><line class="zcd-spoke" x1="${fx}" y1="${cy}" x2="${fx}" y2="${cy - 17}"/>
+      <line class="zcd-spoke" x1="${fx}" y1="${cy}" x2="${fx + 15}" y2="${cy + 8.5}"/><line class="zcd-spoke" x1="${fx}" y1="${cy}" x2="${fx - 15}" y2="${cy + 8.5}"/></g></g>`;
   g += label(570, Y + 352, "SUPPLY FAN", m.fan.length || m.loaded ? (m.fanOn ? "On" : "Off") : m.fanOn ? "On (status)" : "–", m.fanOn ? "ok" : "");
 
   // --- sensors, each on its own duct

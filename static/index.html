@@ -202,9 +202,13 @@ table.tbl th.num{text-align:right}
 .zcd-coil.heat.on rect{fill:var(--heat-soft);stroke:var(--heat)} .zcd-coil.heat.on path{stroke:var(--heat)}
 .zcd-coil.cool.on rect{fill:var(--cool-soft);stroke:var(--cool)} .zcd-coil.cool.on path{stroke:var(--cool)}
 .zcd-pip{fill:var(--panel);stroke:var(--muted);stroke-width:1.5} .zcd-pip.on{fill:var(--cool);stroke:var(--cool)}
-.zcd-fan > circle{fill:var(--panel);stroke:var(--muted);stroke-width:1.5}
-.zcd-blades{fill:var(--line)}
-.zcd-fan.on > circle{stroke:var(--ok)} .zcd-fan.on .zcd-blades{fill:var(--ok);animation:zcd-spin 1.4s linear infinite}
+.zcd-housing-fill{fill:var(--panel)} .zcd-housing{fill:none;stroke:var(--muted);stroke-width:1.8;stroke-linejoin:round;stroke-linecap:round}
+.zcd-blades line{stroke:var(--line);stroke-width:2.6;stroke-linecap:round}
+.zcd-blades .zcd-spoke{stroke-width:2}
+.zcd-rim{fill:none;stroke:var(--line);stroke-width:1.5} .zcd-hub{fill:var(--line)}
+.zcd-fan.on .zcd-housing{stroke:var(--ok)}
+.zcd-fan.on .zcd-blades line,.zcd-fan.on .zcd-rim{stroke:var(--ok)} .zcd-fan.on .zcd-hub{fill:var(--ok)}
+.zcd-fan.on .zcd-blades{animation:zcd-spin 1.4s linear infinite}
 @keyframes zcd-spin{to{transform:rotate(360deg)}}
 .zcd-badge rect{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
 .zcd-badge.heat rect{stroke:var(--heat)} .zcd-badge.cool rect{stroke:var(--cool)}
