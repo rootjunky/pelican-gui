@@ -61,7 +61,7 @@ See [`docker/README.md`](docker/README.md). In short: `cd docker && docker compo
 python -m pip install pyinstaller
 build.bat                      # -> dist\PelicanGUI.exe
 ```
-The EXE has no console window. Use the **Quit** button in the page to stop it.
+The EXE has no console window. Use the **Quit** button in the page to stop it. You can also go to Task manager and end the Pelican_GUI task.
 
 ## Features
 Every Pelican API object is used. Each tab is listed with the objects it calls.
