@@ -171,6 +171,48 @@ table.tbl th.num{text-align:right}
 .zc-io b{display:block;font-size:17px;margin-top:2px}
 .zc-io.on{border-color:var(--ok)} .zc-io.on b{color:var(--ok)}
 .zc-sub{margin:16px 0 6px;font-size:13px;color:var(--muted);font-weight:600}
+.zc-diagram{overflow-x:auto;margin-top:10px}
+.zc-diagram svg{display:block;width:100%;min-width:680px;height:auto;font-family:inherit}
+.zcd-case{fill:var(--fan-soft);stroke:var(--muted);stroke-width:1.5}
+.zcd-fill{fill:var(--fan-soft)} .zcd-edge{fill:none;stroke:var(--muted);stroke-width:1.5;stroke-linejoin:round}
+.zcd-arrow{fill:none;stroke:var(--muted);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.zcd-arrow.on{stroke:var(--accent)}
+.zcd-lead{stroke:var(--muted);stroke-width:1.5;stroke-dasharray:3 3}
+.zcd-louver{stroke:var(--muted);stroke-width:2}
+.zcd-flow{fill:none;stroke:var(--line);stroke-width:3;stroke-dasharray:10 12;stroke-linecap:round}
+.zcd-flow.on{stroke:var(--accent);opacity:.55;animation:zcd-flow 1.2s linear infinite}
+@keyframes zcd-flow{to{stroke-dashoffset:-22}}
+.zcd-tag{font-size:11px;font-weight:650;letter-spacing:.08em;fill:var(--muted)}
+.zcd-name{font-size:13px;font-weight:650;fill:var(--ink)}
+.zcd-cap{font-size:10.5px;font-weight:650;letter-spacing:.06em;fill:var(--muted)}
+.zcd-val{font-size:13px;font-weight:650;fill:var(--ink)}
+.zcd-val.ok{fill:var(--ok)} .zcd-val.heat{fill:var(--heat)} .zcd-val.cool{fill:var(--cool)}
+.zcd-sub{font-size:11px;fill:var(--muted)}
+.zcd-damper line{stroke:var(--muted);stroke-width:4;stroke-linecap:round;transition:transform .6s}
+.zcd-damper.on line{stroke:var(--ok)}
+.zcd-filter{fill:none;stroke:var(--muted);stroke-width:1.5}
+.zcd-coil rect{fill:var(--panel);stroke:var(--muted);stroke-width:1.5}
+.zcd-coil path{fill:none;stroke:var(--line);stroke-width:2}
+.zcd-coil.heat.on rect{fill:var(--heat-soft);stroke:var(--heat)} .zcd-coil.heat.on path{stroke:var(--heat)}
+.zcd-coil.cool.on rect{fill:var(--cool-soft);stroke:var(--cool)} .zcd-coil.cool.on path{stroke:var(--cool)}
+.zcd-pip{fill:var(--panel);stroke:var(--muted);stroke-width:1.5} .zcd-pip.on{fill:var(--cool);stroke:var(--cool)}
+.zcd-fan > circle{fill:var(--panel);stroke:var(--muted);stroke-width:1.5}
+.zcd-blades{fill:var(--line)}
+.zcd-fan.on > circle{stroke:var(--ok)} .zcd-fan.on .zcd-blades{fill:var(--ok);animation:zcd-spin 1.4s linear infinite}
+@keyframes zcd-spin{to{transform:rotate(360deg)}}
+.zcd-badge rect{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
+.zcd-badge.heat rect{stroke:var(--heat)} .zcd-badge.cool rect{stroke:var(--cool)}
+.zcd-bl{font-size:10px;font-weight:650;letter-spacing:.08em;fill:var(--muted)}
+.zcd-bv{font-size:19px;font-weight:700;fill:var(--ink)}
+.zcd-badge.heat .zcd-bv{fill:var(--heat)} .zcd-badge.cool .zcd-bv{fill:var(--cool)}
+.zcd-bs{font-size:10.5px;fill:var(--muted)}
+.zcd-bldg{fill:none;stroke:var(--muted);stroke-width:1.5;stroke-dasharray:4 4}
+.zcd-zone rect{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
+.zcd-zone.fan rect{fill:var(--fan-soft);stroke:var(--fan)}
+.zcd-zone.heat rect{fill:var(--heat-soft);stroke:var(--heat)} .zcd-zone.cool rect{fill:var(--cool-soft);stroke:var(--cool)}
+.zcd-zn{font-size:12px;font-weight:650;fill:var(--ink)} .zcd-zs{font-size:11px;fill:var(--muted)}
+.zcd-zone.heat .zcd-zs{fill:var(--heat)} .zcd-zone.cool .zcd-zs{fill:var(--cool)}
+@media (prefers-reduced-motion:reduce){.zcd-flow.on,.zcd-fan.on .zcd-blades{animation:none}}
 .cards-mini{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
 @media (max-width:600px){main{padding:16px} header{padding:10px 16px} nav.tabs{padding:0 8px;top:0;position:static}
   .sched-row{grid-template-columns:24px 1fr 1fr 1fr;}}
