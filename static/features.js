@@ -105,7 +105,10 @@ function showTab(name) {
   try { localStorage.setItem("pelican.tab", name); } catch {}
   if (TAB_INIT[name] && !F.loaded[name]) {
     // Tabs build zone pickers from the zone list, so wait for the first load.
-    if (!state.stats.length && name !== "sites" && (F.waits = (F.waits || 0) + 1) < 120) {
+    // The Sites and Zone controller tabs don't use the zone list, and there is
+    // nothing to wait for once the thermostat load has failed (e.g. subscription expired).
+    const needsZones = name !== "sites" && name !== "zc";
+    if (needsZones && !state.stats.length && !state.loadFailed && (F.waits = (F.waits || 0) + 1) < 120) {
       $(`#tab-${name}`).innerHTML = spinner("Loading zones…");
       clearTimeout(F.waitTimer);
       F.waitTimer = setTimeout(() => { if (!$(`#tab-${name}`).hidden) showTab(name); }, 500);
@@ -1168,7 +1171,7 @@ async function loadZcList() {
   const body = $("#zcBody"), keep = ZC.cur ? ZC.cur.serialNo || ZC.cur.name : null;
   try {
     const d = (await api("/api/zc")).data || {};
-    ZC.list = d.controllers || []; ZC.webError = d.webError || "";
+    ZC.list = d.controllers || []; ZC.webError = d.webError || ""; ZC.apiError = d.apiError || "";
   } catch (e) { body.innerHTML = errBox(e); return; }
   if (!ZC.list.length) { body.innerHTML = '<div class="note">This site has no zone controllers.</div>'; return; }
   const pick = $("#zcPick");
@@ -1194,6 +1197,7 @@ function selectZc(i, keepHistory) {
     <div class="panel">
       <h3>${esc(z.name || "Zone controller")}</h3>
       <span class="hint">${esc([z.description, z.serialNo && `serial ${z.serialNo}`].filter(Boolean).join(" · "))}</span>
+      ${ZC.apiError ? `<div class="note">Status, sensors and zones come from Pelican's API, which refused: ${esc(ZC.apiError)}. Live outputs and history below come from Site Manager.</div>` : ""}
       <div class="summary">${chips.map(([k, v]) => `<span class="chip">${esc(k)} <b>${esc(v)}</b></span>`).join("")}</div>
       ${sensors.length ? `<div class="zc-grid">${sensors.map(s => `<div class="zc-io"><span class="hint">${esc(s.type)} · ${esc(s.name)}</span><b>${esc(s.value)}${unit(s)}</b></div>`).join("")}</div>` : ""}
     </div>

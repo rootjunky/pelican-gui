@@ -631,14 +631,19 @@ def _zc_node(node, epnum):
 
 
 def get_zone_controllers():
+    # api.cgi gives status/zones/sensors but is blocked when the site's
+    # subscription has expired. The Site Manager endpoints (list, live outputs,
+    # history) are separate, so carry on with those instead of failing the tab.
+    api_error = ""
     try:
         r = pelican_call("get", "ZoneController", value=";".join(ZC_FIELDS))
         zcs = as_list(r.get("ZoneController"))
     except PelicanError as e:
-        if re.search(r"no .*found|unknown object", str(e), re.I):
-            zcs = []
-        else:
-            raise
+        zcs = []
+        if not re.search(r"no .*found|unknown object", str(e), re.I):
+            if getattr(e, "auth", False):
+                raise
+            api_error = str(e)
     for z in zcs:
         z["zones"] = as_list(z.get("zones")) if isinstance(z.get("zones"), (dict, list)) else []
         z["slaves"] = as_list(z.get("slaves")) if isinstance(z.get("slaves"), (dict, list)) else []
@@ -658,8 +663,10 @@ def get_zone_controllers():
             match["node"], match["epnum"] = node, ep
     except PelicanError as e:
         web_error = str(e)
+    if api_error and not zcs:
+        raise PelicanError(api_error if not web_error else f"{api_error} (Site Manager: {web_error})")
     zcs.sort(key=lambda z: str(z.get("name", "")).lower())
-    return {"controllers": zcs, "webError": web_error}
+    return {"controllers": zcs, "webError": web_error, "apiError": api_error}
 
 
 def get_zc_outputs(node, epnum):

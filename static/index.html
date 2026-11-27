@@ -326,11 +326,12 @@ async function refresh(manual) {
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
   try {
     const j = await api("/api/thermostats");
-    state.stats = j.data || [];
+    state.stats = j.data || []; state.loadFailed = false;
     $("#stamp").textContent = "Updated " + new Date().toLocaleTimeString();
     showBanner("");
     if (manual) toast("Refreshed");
   } catch (e) {
+    state.loadFailed = true;
     showBanner(e.message);
   } finally {
     btn.disabled = false; btn.textContent = "Refresh";
@@ -629,7 +630,7 @@ function enterApp(info) {
   $("#login").classList.remove("show");
   showBrand(info);
   document.title = `${info.altName || info.domain} · Pelican Control`;
-  state.stats = []; state.pending = {}; state.cardMsg = {}; state.closedGroups = new Set();
+  state.stats = []; state.loadFailed = false; state.pending = {}; state.cardMsg = {}; state.closedGroups = new Set();
   render(); refresh(false); schedule();
   if (typeof featuresOnEnter === "function") featuresOnEnter(info);
 }
