@@ -102,7 +102,6 @@ const TAB_INIT = {
 function showTab(name) {
   document.querySelectorAll("nav.tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
   document.querySelectorAll("main > section.tab").forEach(s => { s.hidden = s.id !== `tab-${name}`; });
-  try { localStorage.setItem("pelican.tab", name); } catch {}
   if (TAB_INIT[name] && !F.loaded[name]) {
     // Tabs build zone pickers from the zone list, so wait for the first load.
     // The Sites and Zone controller tabs don't use the zone list, and there is
@@ -125,9 +124,10 @@ $("#tabs").addEventListener("click", e => {
 function featuresOnEnter() {
   F.loaded = {}; F.power = [];
   for (const id of Object.keys(TAB_INIT)) $(`#tab-${id}`).innerHTML = "";
-  let tab = "zones";
-  try { tab = localStorage.getItem("pelican.tab") || "zones"; } catch {}
-  showTab(TAB_INIT[tab] || tab === "zones" ? tab : "zones");
+  // Open on the Zone controller view; loadZcList() falls back to Zones when
+  // the site has no zone controller.
+  ZC.autoOpen = true;
+  showTab("zc");
   clearInterval(F.notifTimer);
   updateAlertBadge();
   F.notifTimer = setInterval(() => { if (!document.hidden) updateAlertBadge(); }, 5 * 60 * 1000);
@@ -1133,7 +1133,6 @@ $("#tab-sites").addEventListener("click", async e => {
     const j = await api("/api/switch-site", { site: b.dataset.switch });
     saveLocalSites([j.data.domain, ...localSites().filter(x => x !== j.data.domain)]);
     await loadSession();
-    try { localStorage.setItem("pelican.tab", "zones"); } catch {}   // land on the new site's zones
     enterApp(j.data);
     toast(`Switched to ${j.data.altName || j.data.domain}${j.data.viaToken ? " (using a Pelican access token)" : ""}`);
   } catch (err) { toast(err.message); b.disabled = false; b.textContent = "Switch to this site"; }
@@ -1172,7 +1171,9 @@ async function loadZcList() {
   try {
     const d = (await api("/api/zc")).data || {};
     ZC.list = d.controllers || []; ZC.webError = d.webError || ""; ZC.apiError = d.apiError || "";
-  } catch (e) { body.innerHTML = errBox(e); return; }
+  } catch (e) { ZC.autoOpen = false; body.innerHTML = errBox(e); return; }
+  const auto = ZC.autoOpen; ZC.autoOpen = false;
+  if (!ZC.list.length && auto && !$("#tab-zc").hidden) { showTab("zones"); return; }
   if (!ZC.list.length) { body.innerHTML = '<div class="note">This site has no zone controllers.</div>'; return; }
   const pick = $("#zcPick");
   pick.innerHTML = ZC.list.map((z, i) => `<option value="${i}">${esc(z.name || z.serialNo)}</option>`).join("");
@@ -1356,7 +1357,7 @@ function renderZcDiagram() {
       const x = x0 + (i % perRow) * (zw + gap), y = zTop + 8 + Math.floor(i / perRow) * (zh + gap), req = String(r.request || r.runStatus || "");
       const cls = /heat/i.test(req) ? "heat" : /cool/i.test(req) ? "cool" : /fan/i.test(req) ? "fan" : "";
       // Nested <svg> clips long names to the box.
-      g += `<g class="zcd-zone ${cls}">${tip(`${r.name} (${r.serialNo || "?"})\nCalling for: ${r.request || "–"}\nRunning: ${r.runStatus || "–"}\nWaiting: ${r.waitingStatus || "–"}`)}
+      g += `<g class="zcd-zone link ${cls}" role="link" tabindex="0" data-zone="${esc(r.name)}" data-serial="${esc(r.serialNo || "")}" aria-label="Open ${esc(r.name)} in Zones">${tip(`${r.name} (${r.serialNo || "?"})\nCalling for: ${r.request || "–"}\nRunning: ${r.runStatus || "–"}\nWaiting: ${r.waitingStatus || "–"}\nClick to open in Zones`)}
         <rect x="${x.toFixed(1)}" y="${y}" width="${zw.toFixed(1)}" height="${zh}" rx="6"/>
         <svg x="${x.toFixed(1)}" y="${y}" width="${(zw - 4).toFixed(1)}" height="${zh}">
           <text class="zcd-zn" x="8" y="20">${esc(r.name)}</text>
@@ -1467,8 +1468,33 @@ function renderZcDiagram() {
   const aria = [`${z.name || "Zone controller"} air handler`, m.status, m.supply && `supply ${t1(m.supply.v)}`, m.ret && `return ${t1(m.ret.v)}`,
     m.outside && `outside ${t1(m.outside.v)}`, `fan ${m.fanOn ? "on" : "off"}`, m.cool.length && `cooling ${m.coolOn ? `stage ${m.coolOn}` : "off"}`,
     (m.heat.length || vh) && `heat ${heatActive ? "on" : "off"}`, pct != null && `economizer damper ${pct}%`].filter(Boolean).join(", ");
+  const go = e => {
+    const el = e.target.closest && e.target.closest(".zcd-zone[data-zone]"); if (!el) return;
+    if (e.type === "keydown" && e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault(); zcGoToZone(el.dataset.zone, el.dataset.serial);
+  };
+  box.onclick = go; box.onkeydown = go;
   box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}">${g}</svg>
     ${m.loaded ? "" : `<div class="hint">${z.node ? "Waiting for live relay data…" : "Relay states need the Site Manager login, so heat, cool and fan come from the status text."}</div>`}`;
+}
+
+/** Jump from a zone in the diagram to its card on the Zones tab. */
+function zcGoToZone(name, serial, tries = 0) {
+  showTab("zones");
+  const t = state.stats.find(t => serial && t.serialNo === serial) || state.stats.find(t => t.name === name);
+  if (!t) {
+    // Zone list still loading: try again shortly. Otherwise search for it by name.
+    if (!state.stats.length && !state.loadFailed && tries < 40) { setTimeout(() => zcGoToZone(name, serial, tries + 1), 300); return; }
+    $("#zoneSearch").value = name; render(); return;
+  }
+  $("#zoneSearch").value = "";
+  state.closedGroups.delete(t.groupName || "Ungrouped");
+  render();
+  const card = [...document.querySelectorAll("#grid article.card")].find(c => c.dataset.name === t.name);
+  if (!card) return;
+  card.scrollIntoView({ block: "center" });
+  card.classList.remove("flash"); void card.offsetWidth; card.classList.add("flash");
+  setTimeout(() => card.classList.remove("flash"), 2200);
 }
 
 async function loadZcHistory(date) {

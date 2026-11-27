@@ -212,7 +212,11 @@ table.tbl th.num{text-align:right}
 .zcd-zone.heat rect{fill:var(--heat-soft);stroke:var(--heat)} .zcd-zone.cool rect{fill:var(--cool-soft);stroke:var(--cool)}
 .zcd-zn{font-size:12px;font-weight:650;fill:var(--ink)} .zcd-zs{font-size:11px;fill:var(--muted)}
 .zcd-zone.heat .zcd-zs{fill:var(--heat)} .zcd-zone.cool .zcd-zs{fill:var(--cool)}
-@media (prefers-reduced-motion:reduce){.zcd-flow.on,.zcd-fan.on .zcd-blades{animation:none}}
+.zcd-zone.link{cursor:pointer;outline:none}
+.zcd-zone.link:hover rect,.zcd-zone.link:focus-visible rect{stroke:var(--accent);stroke-width:2.5}
+.card.flash{animation:card-flash 2.2s ease-out}
+@keyframes card-flash{0%,60%{box-shadow:0 0 0 3px var(--accent)}100%{box-shadow:0 0 0 3px transparent}}
+@media (prefers-reduced-motion:reduce){.zcd-flow.on,.zcd-fan.on .zcd-blades{animation:none} .card.flash{animation:none;box-shadow:0 0 0 3px var(--accent)}}
 .cards-mini{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
 @media (max-width:600px){main{padding:16px} header{padding:10px 16px} nav.tabs{padding:0 8px;top:0;position:static}
   .sched-row{grid-template-columns:24px 1fr 1fr 1fr;}}
